@@ -461,6 +461,24 @@ pub enum TermKind {
         then: Box<Term>,
         els: Box<Term>,
     },
+    /// A nonescaping per-element region over an inline array. Captured places
+    /// are read-only; pointer targets and helper effects are not frozen.
+    ParallelMap {
+        input: Box<Term>,
+        element: ParallelParameter,
+        body: Box<Term>,
+        captures: Vec<BindingId>,
+    },
+    /// Combine values with a supplied identity and two iteration-local operands.
+    /// The schedule may change grouping; no algebraic laws are compiler-proven.
+    ParallelReduce {
+        input: Box<Term>,
+        identity: Box<Term>,
+        left: ParallelParameter,
+        right: ParallelParameter,
+        body: Box<Term>,
+        captures: Vec<BindingId>,
+    },
     While {
         cond: Box<Term>,
         body: Box<Term>,
@@ -539,6 +557,14 @@ pub enum TermKind {
 pub struct Arguments {
     pub values: Vec<Term>,
     pub params: Vec<Type>,
+}
+
+/// An iteration-local value, initialized afresh for each parallel block execution.
+#[derive(Debug, Clone)]
+pub struct ParallelParameter {
+    pub binding: BindingId,
+    pub name: Ident,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]

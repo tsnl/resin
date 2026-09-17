@@ -231,6 +231,24 @@ impl Specialization<'_, '_> {
         Ok(Box::new(self.term(source)?))
     }
 
+    fn parallel_parameter(
+        &mut self,
+        source: &resin_hir::ParallelParameter,
+    ) -> Result<concrete::ParallelParameter, Error> {
+        Ok(concrete::ParallelParameter {
+            binding: source.binding,
+            name: source.name.clone(),
+            ty: self.ty(&source.ty)?,
+        })
+    }
+
+    fn require_host_parallel(&self) -> Result<(), Error> {
+        if self.instances.profile(self.current) == crate::Profile::Shader {
+            return Err(self.profile_error("parallel blocks currently have a host backend only; cooperative workgroup lowering is not implemented".into()));
+        }
+        Ok(())
+    }
+
     fn arguments(&mut self, source: &resin_hir::Arguments) -> Result<concrete::Arguments, Error> {
         Ok(concrete::Arguments {
             values: source
@@ -1199,6 +1217,36 @@ impl Specialization<'_, '_> {
                 then: self.boxed(then)?,
                 els: self.boxed(els)?,
             },
+            resin_hir::TermKind::ParallelMap {
+                input,
+                element,
+                body,
+                ..
+            } => {
+                self.require_host_parallel()?;
+                concrete::TermKind::ParallelMap {
+                    input: self.boxed(input)?,
+                    element: self.parallel_parameter(element)?,
+                    body: self.boxed(body)?,
+                }
+            }
+            resin_hir::TermKind::ParallelReduce {
+                input,
+                identity,
+                left,
+                right,
+                body,
+                ..
+            } => {
+                self.require_host_parallel()?;
+                concrete::TermKind::ParallelReduce {
+                    input: self.boxed(input)?,
+                    identity: self.boxed(identity)?,
+                    left: self.parallel_parameter(left)?,
+                    right: self.parallel_parameter(right)?,
+                    body: self.boxed(body)?,
+                }
+            }
             resin_hir::TermKind::While { cond, body } => concrete::TermKind::While {
                 cond: self.boxed(cond)?,
                 body: self.boxed(body)?,

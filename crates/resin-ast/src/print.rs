@@ -256,6 +256,32 @@ fn sexp_term(term: &Term) -> SExp {
         TermKind::While { cond, body } => {
             list_sp("while", term.span, vec![sexp_term(cond), sexp_term(body)])
         }
+        TermKind::ParallelMap {
+            input,
+            element,
+            body,
+        } => list_sp(
+            "parallel-map",
+            term.span,
+            vec![sexp_term(input), sexp_pattern(element), sexp_term(body)],
+        ),
+        TermKind::ParallelReduce {
+            input,
+            identity,
+            left,
+            right,
+            body,
+        } => list_sp(
+            "parallel-reduce",
+            term.span,
+            vec![
+                sexp_term(input),
+                sexp_term(identity),
+                sexp_pattern(left),
+                sexp_pattern(right),
+                sexp_term(body),
+            ],
+        ),
         TermKind::Array { elems } => {
             list_sp("array", term.span, elems.iter().map(sexp_term).collect())
         }

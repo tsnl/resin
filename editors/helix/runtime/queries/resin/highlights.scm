@@ -47,3 +47,8 @@
 (type_parameters "<" @punctuation.bracket ">" @punctuation.bracket)
 (type_arguments "<" @punctuation.bracket ">" @punctuation.bracket)
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (type_application))
+
+["parallel_map" "parallel_reduce"] @keyword
+(parallel_map_term element: (binding_pattern name: (lid) @variable.parameter))
+(parallel_reduce_term left: (binding_pattern name: (lid) @variable.parameter))
+(parallel_reduce_term right: (binding_pattern name: (lid) @variable.parameter))

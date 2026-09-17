@@ -85,6 +85,27 @@ fn constants_and_sizeof_are_highlighted_and_outlined() {
 }
 
 #[test]
+fn parallel_keywords_and_block_parameters_are_highlighted() {
+    let source =
+        "fn f() { let ys = parallel_map([1]) |x| { x }; parallel_reduce(ys, 0) |a, b| { a + b }; }";
+    for queries in [ZED_QUERIES, HELIX_QUERIES] {
+        let highlighted = captures(queries[0].1, source);
+        for (kind, text) in [
+            ("keyword", "parallel_map"),
+            ("keyword", "parallel_reduce"),
+            ("variable.parameter", "x"),
+            ("variable.parameter", "a"),
+            ("variable.parameter", "b"),
+        ] {
+            assert!(
+                highlighted.contains(&(kind.into(), text.into())),
+                "{kind}: {text}"
+            );
+        }
+    }
+}
+
+#[test]
 fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
     let source = "struct Point { x: f32, y: f32, } type Position = Point;";
     let outline = captures(ZED_QUERIES[3].1, source);

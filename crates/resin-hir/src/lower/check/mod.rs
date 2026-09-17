@@ -20,6 +20,7 @@ use std::{
 };
 
 mod constants;
+mod parallel;
 
 //
 // Checking state and signatures
@@ -115,6 +116,7 @@ pub(super) struct CheckedFile {
 }
 struct Checker<'a> {
     loop_depth: usize,
+    parallel_depth: usize,
     function_ids: std::collections::HashMap<DeclarationId, FunctionId>,
     typing: Inference<'a>,
     scopes: Scopes,
@@ -140,6 +142,7 @@ impl<'a> Checker<'a> {
             holes: vec![],
             expressions: vec![],
             loop_depth: 0,
+            parallel_depth: 0,
             result: Ty::Unit.into(),
             iota: None,
             initializers: vec![],
@@ -1628,6 +1631,12 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::Return { value } => {
+                if self.checker.parallel_depth != 0 {
+                    return Err(GenerateError::inference(
+                        span,
+                        "return cannot leave a parallel block; use its tail value",
+                    ));
+                }
                 let value = self.child(value, Some(self.checker.result.clone()));
                 equate = Some(Ty::union([]).into());
                 TermKind::Return {
@@ -1635,6 +1644,12 @@ impl Expression<'_, '_> {
                 }
             }
             resin_ast::TermKind::Try { value } => {
+                if self.checker.parallel_depth != 0 {
+                    return Err(GenerateError::inference(
+                        span,
+                        "? cannot return from a parallel block; handle the error inside the block",
+                    ));
+                }
                 let input = self.child(value, None);
                 let result = self.checker.result.clone();
                 self.constrain((span, Constraint::Try(input.ty.clone(), out.clone(), result)));
@@ -1653,6 +1668,23 @@ impl Expression<'_, '_> {
                     then: Box::new(then),
                     els: Box::new(els),
                 }
+            }
+            resin_ast::TermKind::ParallelMap {
+                input,
+                element,
+                body,
+            } => self.parallel_map(input, element, body, span, &out)?,
+            resin_ast::TermKind::ParallelReduce {
+                input,
+                identity,
+                left,
+                right,
+                body,
+            } => {
+                let (kind, ty) =
+                    self.parallel_reduce(input, identity, [left, right], body, span)?;
+                equate = Some(ty);
+                kind
             }
             resin_ast::TermKind::While { cond, body } => {
                 let depth = std::mem::replace(&mut self.checker.loop_depth, 0);
@@ -2016,6 +2048,10 @@ fn expression_exits(term: &resin_ast::Term) -> bool {
             expression_exits(value) || arms.iter().all(|arm| expression_exits(&arm.body))
         }
         While { cond, .. } => expression_exits(cond),
+        ParallelMap { input, .. } => expression_exits(input),
+        ParallelReduce {
+            input, identity, ..
+        } => expression_exits(input) || expression_exits(identity),
         Call { func, args } => expression_exits(func) || args.iter().any(expression_exits),
         Builtin { name, args, .. } if matches!(name.as_ref(), "&&" | "||") => {
             expression_exits(&args[0])

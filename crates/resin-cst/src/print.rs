@@ -100,9 +100,9 @@ pub fn format_source(source: &str) -> Option<String> {
             }),
             "," => {
                 active.last().is_some_and(|g| g.multiline)
-                    && node
-                        .parent()
-                        .is_none_or(|parent| parent.kind() != "const_spec")
+                    && node.parent().is_none_or(|parent| {
+                        !matches!(parent.kind(), "const_spec" | "parallel_reduce_term")
+                    })
             }
             _ => false,
         };
@@ -199,6 +199,17 @@ fn space_between(left: Node<'_>, right: Node<'_>) -> bool {
     }
     let a = left.kind();
     let b = right.kind();
+    if a == "|"
+        && left
+            .next_sibling()
+            .is_some_and(|node| node.kind() == "binding_pattern")
+        || b == "|"
+            && right
+                .prev_sibling()
+                .is_some_and(|node| node.kind() == "binding_pattern")
+    {
+        return false;
+    }
     if right.parent().is_some_and(|p| p.kind() == "unwrap_suffix") {
         return false;
     }

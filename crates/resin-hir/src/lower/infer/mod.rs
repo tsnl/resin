@@ -1415,6 +1415,12 @@ pub(crate) enum Constraint {
     },
     Ascribe(Type, Type, bool),
     Record(Vec<(Arc<str>, Type)>, Type),
+    ParallelArray {
+        input: Type,
+        element: Type,
+        /// A map preserves the input extent with a possibly different element type.
+        mapped: Option<(Type, Type)>,
+    },
     Builtin(Arc<str>, Vec<Type>, Type),
 }
 
@@ -2475,6 +2481,34 @@ impl Inference<'_> {
                     return Ok(false);
                 }
             }
+            Constraint::ParallelArray {
+                input,
+                element,
+                mapped,
+            } => {
+                let shape = self.shape(&Type::value(input.clone()), false, span)?;
+                match shape {
+                    Type::Variable(_) | Type::Apply { .. } => return Ok(false),
+                    Type::Node(Head::Array(length), children) => {
+                        if !self.solver.unify(element, &children[0], span)? {
+                            return Ok(false);
+                        }
+                        if let Some((value, out)) = mapped {
+                            return self.solver.unify(
+                                out,
+                                &Type::Node(Head::Array(length), vec![Type::value(value.clone())]),
+                                span,
+                            );
+                        }
+                    }
+                    _ => {
+                        return Err(error(
+                            span,
+                            "parallel blocks currently require an inline array with a known length",
+                        ));
+                    }
+                }
+            }
             Constraint::Field(input, name, out) => {
                 let shape = self.shape(input, true, span)?;
                 if let Some(element) = shape.view_element() {
@@ -2751,6 +2785,7 @@ impl Constraint {
             Self::Address(pointee, _) => vec![pointee],
             Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
             Self::Builtin(_, args, _) => args.iter().collect(),
+            Self::ParallelArray { input, .. } => vec![input],
         }
     }
 }

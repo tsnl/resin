@@ -229,3 +229,9 @@ Only paths that continue participate in definite-initialization checks.
 `assert(condition);` evaluates a `bool` once and returns unit. False traps with
 `assertion failed` on the host, or stops the current shader invocation through
 the shader failure path. Assertions remain enabled in optimized builds.
+
+## Parallel blocks
+
+`parallel_map` and `parallel_reduce` introduce nonescaping blocks with explicit
+parameters and read-only captures. See [Parallel blocks](parallel.md) for their
+syntax, ownership rules, and current serial host implementation.

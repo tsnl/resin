@@ -13,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 type Result<T> = std::result::Result<T, GenerateError>;
 
+mod parallel;
+
 pub(super) struct CompletedBody {
     pub body: Term,
     pub shaders: BTreeSet<FunctionId>,
@@ -45,6 +47,7 @@ pub(super) fn function(
         mutable,
         moved: BTreeMap::new(),
         copy_requirements: BTreeMap::new(),
+        parallel_captures: Vec::new(),
     };
     let mut body = completion.elaborate(source)?;
     if !completion.copy_requirements.is_empty() {
@@ -98,6 +101,7 @@ struct Completion<'a> {
     written: BTreeSet<DeclarationId>,
     moved: BTreeMap<DeclarationId, BTreeSet<MovedPlace>>,
     copy_requirements: BTreeMap<(crate::Type, crate::Type), Span>,
+    parallel_captures: Vec<parallel::Captures>,
 }
 
 impl Completion<'_> {
@@ -143,6 +147,26 @@ impl Completion<'_> {
             ty => ty,
         }
         .clone();
+        if self.captured_place(&term) {
+            if matches!(target, crate::Type::Reference { mutable: true, .. }) {
+                return Err(GenerateError::inference(
+                    term.span,
+                    "parallel block captures are read-only; cannot borrow a capture as RefMut",
+                ));
+            }
+            // Preserve this restriction through dependent calls: specialization
+            // sees a read-only reference even when its consumer is not known yet.
+            term = Term {
+                span: term.span,
+                ty: crate::Type::Reference {
+                    referent: Box::new(value_type.clone()),
+                    mutable: false,
+                },
+                kind: TermKind::Use {
+                    arg: Box::new(term),
+                },
+            };
+        }
         if let crate::Type::Reference { mutable, .. } = target {
             require_reference_place(&term)?;
             if mutable {
@@ -357,6 +381,40 @@ impl Completion<'_> {
             }
             typed::TermKind::If { cond, then, els } => self.if_expression(cond, then, els)?,
             typed::TermKind::While { cond, body } => self.while_expression(cond, body)?,
+            typed::TermKind::ParallelMap {
+                input,
+                element,
+                body,
+            } => {
+                let input = self.parallel_input(input)?;
+                let (mut parameters, body, captures) = self.parallel_body(&[element], body)?;
+                TermKind::ParallelMap {
+                    input,
+                    element: parameters.remove(0),
+                    body,
+                    captures,
+                }
+            }
+            typed::TermKind::ParallelReduce {
+                input,
+                identity,
+                left,
+                right,
+                body,
+            } => {
+                let input = self.parallel_input(input)?;
+                let identity = self.boxed(identity)?;
+                let (parameters, body, captures) = self.parallel_body(&[left, right], body)?;
+                let [left, right]: [_; 2] = parameters.try_into().unwrap();
+                TermKind::ParallelReduce {
+                    input,
+                    identity,
+                    left,
+                    right,
+                    body,
+                    captures,
+                }
+            }
             typed::TermKind::Block { stmts, tail } => TermKind::Block {
                 stmts: stmts
                     .iter()
@@ -481,7 +539,7 @@ impl Completion<'_> {
     }
 
     fn reference(
-        &self,
+        &mut self,
         declaration: DeclarationId,
         name: &Ident,
         type_args: &[Type],
@@ -515,6 +573,11 @@ impl Completion<'_> {
                 span: name.span,
                 kind,
             });
+        }
+        for captures in &mut self.parallel_captures {
+            if captures.enclosing.contains(&declaration) {
+                captures.used.insert(declaration);
+            }
         }
         Ok(TermKind::Local {
             binding: declaration,
@@ -569,6 +632,12 @@ impl Completion<'_> {
 
     fn assign(&mut self, place: &typed::Term, value: &typed::Term) -> Result<TermKind> {
         let place = self.place(place)?;
+        if self.captured_place(&place) {
+            return Err(GenerateError::inference(
+                place.span,
+                "parallel block captures are read-only; cannot assign to a capture",
+            ));
+        }
         let destination = owned_path(&place);
         if destination.is_none() {
             if !reference_place(&place) {

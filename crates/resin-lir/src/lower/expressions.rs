@@ -31,6 +31,18 @@ impl FunctionLowering<'_> {
             TermKind::Match { value, arms } => return self.gen_match(value, arms, expected),
             TermKind::If { cond, then, els } => return self.gen_if(cond, then, els, expected),
             TermKind::While { cond, body } => return self.gen_while(cond, body),
+            TermKind::ParallelMap {
+                input,
+                element,
+                body,
+            } => return self.gen_parallel_map(input, element, body, expected),
+            TermKind::ParallelReduce {
+                input,
+                identity,
+                left,
+                right,
+                body,
+            } => return self.gen_parallel_reduce(input, identity, [left, right], body),
             TermKind::Block { stmts, tail } => return self.gen_block(stmts, tail, expected),
             TermKind::Record { fields } => return self.gen_record(fields, expected),
             TermKind::Array { elems } => return self.gen_array(elems, expected),

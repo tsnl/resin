@@ -394,6 +394,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Materialized nominal instances close recursive fields and receive specialized drop hooks
   before storage lowering. Diagnostics render source type names instead of private type IDs.
   keep inference solvers and deferred emission callbacks out of the lowering pass.
+- Parallel map/reduce blocks bind iteration-local values and permit read-only captures.
+  Retain explicit region nodes and capture identities in HIR; check capture writes,
+  mutable borrows, moves, and nonlocal exits during HIR construction. The initial
+  serial host schedule supports inline arrays with known extents and copyable inputs;
+  shader specialization rejects these regions until cooperative lowering exists.
+  See `doc/parallel.md` and the staged design in `doc/cooperative-execution.md`.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
   Compute entries take `(u64, Ptr<T>)` and return unit; their index is the global X invocation
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.

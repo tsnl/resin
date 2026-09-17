@@ -49,3 +49,8 @@
 (postfix_term prefix: (primary_term (lid) @function) . suffix: (type_application))
 
 (boolean) @constant.builtin
+
+["parallel_map" "parallel_reduce"] @keyword
+(parallel_map_term element: (binding_pattern name: (lid) @variable.parameter))
+(parallel_reduce_term left: (binding_pattern name: (lid) @variable.parameter))
+(parallel_reduce_term right: (binding_pattern name: (lid) @variable.parameter))

@@ -1,0 +1,23 @@
+// ANCHOR: parallel_blocks
+export { main };
+
+fn doubled(value: i64) -> i64 {
+	value * 2
+}
+
+fn main() -> i32 {
+	let bias = 1;
+	let values = [1, 2, 3, 4];
+	let mapped = parallel_map(values) |value| {
+		// Helpers are ordinary functions; bias is a read-only capture.
+		let mut result = doubled(value);
+		result = result + bias;
+		result
+	};
+	let total = parallel_reduce(mapped, 0) |left, right| {
+		left + right
+	};
+	assert(total == 24);
+	0
+}
+// ANCHOR_END: parallel_blocks

@@ -18,6 +18,7 @@ mod expressions;
 mod flow;
 mod functions;
 mod instances;
+mod parallel;
 mod places;
 mod specialize;
 mod substitute;

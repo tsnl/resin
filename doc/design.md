@@ -53,6 +53,11 @@ Process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
+The [cooperative execution proposal](cooperative-execution.md) describes planned
+workgroup-level compute entries and host parallel execution. Its initial
+[map/reduce block implementation](parallel.md) currently runs serially on the host.
+
+
 Host code uses source `GpuPtr<T>` and `GpuSpan<T>` wrappers over opaque `GpuView`
 primitives, carrying an allocation
 owner, byte offset, and access permissions. Value copies, explicit clones, and interior views retain the

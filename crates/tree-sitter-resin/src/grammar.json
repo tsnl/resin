@@ -3134,6 +3134,14 @@
         },
         {
           "type": "SYMBOL",
+          "name": "parallel_map_term"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "parallel_reduce_term"
+        },
+        {
+          "type": "SYMBOL",
           "name": "match_term"
         },
         {
@@ -3379,6 +3387,128 @@
         {
           "type": "STRING",
           "value": ")"
+        },
+        {
+          "type": "FIELD",
+          "name": "body",
+          "content": {
+            "type": "SYMBOL",
+            "name": "block_body"
+          }
+        }
+      ]
+    },
+    "parallel_map_term": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "parallel_map"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "input",
+          "content": {
+            "type": "SYMBOL",
+            "name": "term"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": "|"
+        },
+        {
+          "type": "FIELD",
+          "name": "element",
+          "content": {
+            "type": "SYMBOL",
+            "name": "binding_pattern"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "|"
+        },
+        {
+          "type": "FIELD",
+          "name": "body",
+          "content": {
+            "type": "SYMBOL",
+            "name": "block_body"
+          }
+        }
+      ]
+    },
+    "parallel_reduce_term": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "parallel_reduce"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "input",
+          "content": {
+            "type": "SYMBOL",
+            "name": "term"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ","
+        },
+        {
+          "type": "FIELD",
+          "name": "identity",
+          "content": {
+            "type": "SYMBOL",
+            "name": "term"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "STRING",
+          "value": "|"
+        },
+        {
+          "type": "FIELD",
+          "name": "left",
+          "content": {
+            "type": "SYMBOL",
+            "name": "binding_pattern"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ","
+        },
+        {
+          "type": "FIELD",
+          "name": "right",
+          "content": {
+            "type": "SYMBOL",
+            "name": "binding_pattern"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "|"
         },
         {
           "type": "FIELD",
@@ -4272,6 +4402,14 @@
       {
         "type": "STRING",
         "value": "while"
+      },
+      {
+        "type": "STRING",
+        "value": "parallel_map"
+      },
+      {
+        "type": "STRING",
+        "value": "parallel_reduce"
       },
       {
         "type": "STRING",

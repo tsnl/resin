@@ -73,6 +73,18 @@ pub(super) enum TermKind {
         then: Box<Term>,
         els: Box<Term>,
     },
+    ParallelMap {
+        input: Box<Term>,
+        element: ParallelParameter,
+        body: Box<Term>,
+    },
+    ParallelReduce {
+        input: Box<Term>,
+        identity: Box<Term>,
+        left: ParallelParameter,
+        right: ParallelParameter,
+        body: Box<Term>,
+    },
     While {
         cond: Box<Term>,
         body: Box<Term>,
@@ -160,6 +172,13 @@ pub(super) struct Arguments {
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct ParallelParameter {
+    pub binding: BindingId,
+    pub name: Ident,
+    pub ty: Ty,
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct MatchArm {
     /// Destructure an Err member and widen its payload to this binding type.
     pub(super) error_payload: Option<Ty>,
@@ -210,6 +229,10 @@ impl Term {
                 value.exits() || arms.iter().all(|arm| arm.body.exits())
             }
             TermKind::While { cond, .. } => cond.exits(),
+            TermKind::ParallelMap { input, .. } => input.exits(),
+            TermKind::ParallelReduce {
+                input, identity, ..
+            } => input.exits() || identity.exits(),
             TermKind::Call { func, args } => func.exits() || args.iter().any(Term::exits),
             TermKind::Builtin { args, .. } | TermKind::Array { elems: args } => {
                 args.iter().any(Term::exits)

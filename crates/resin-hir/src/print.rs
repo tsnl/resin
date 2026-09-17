@@ -234,6 +234,38 @@ impl Printer {
             TermKind::Continue => atom("continue"),
             TermKind::Return { value } => list("return", vec![self.term(value)]),
             TermKind::While { cond, body } => list("while", vec![self.term(cond), self.term(body)]),
+            TermKind::ParallelMap {
+                input,
+                element,
+                body,
+                captures,
+            } => list(
+                "parallel-map",
+                vec![
+                    self.term(input),
+                    binding(element.binding),
+                    list("captures", captures.iter().copied().map(binding).collect()),
+                    self.term(body),
+                ],
+            ),
+            TermKind::ParallelReduce {
+                input,
+                identity,
+                left,
+                right,
+                body,
+                captures,
+            } => list(
+                "parallel-reduce",
+                vec![
+                    self.term(input),
+                    self.term(identity),
+                    binding(left.binding),
+                    binding(right.binding),
+                    list("captures", captures.iter().copied().map(binding).collect()),
+                    self.term(body),
+                ],
+            ),
             TermKind::Block { stmts, tail } => list(
                 "block",
                 stmts

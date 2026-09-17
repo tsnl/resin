@@ -1029,6 +1029,98 @@
     }
   },
   {
+    "type": "parallel_map_term",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block_body",
+            "named": true
+          }
+        ]
+      },
+      "element": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding_pattern",
+            "named": true
+          }
+        ]
+      },
+      "input": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "parallel_reduce_term",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block_body",
+            "named": true
+          }
+        ]
+      },
+      "identity": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      },
+      "input": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "term",
+            "named": true
+          }
+        ]
+      },
+      "left": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding_pattern",
+            "named": true
+          }
+        ]
+      },
+      "right": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binding_pattern",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "parameter",
     "named": true,
     "fields": {
@@ -1194,6 +1286,14 @@
         },
         {
           "type": "number",
+          "named": true
+        },
+        {
+          "type": "parallel_map_term",
+          "named": true
+        },
+        {
+          "type": "parallel_reduce_term",
           "named": true
         },
         {
@@ -2129,6 +2229,14 @@
   {
     "type": "number",
     "named": true
+  },
+  {
+    "type": "parallel_map",
+    "named": false
+  },
+  {
+    "type": "parallel_reduce",
+    "named": false
   },
   {
     "type": "pointer_deref",

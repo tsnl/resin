@@ -66,6 +66,18 @@ pub(super) enum TermKind {
         then: Box<Term>,
         els: Box<Term>,
     },
+    ParallelMap {
+        input: Box<Term>,
+        element: ParallelParameter,
+        body: Box<Term>,
+    },
+    ParallelReduce {
+        input: Box<Term>,
+        identity: Box<Term>,
+        left: ParallelParameter,
+        right: ParallelParameter,
+        body: Box<Term>,
+    },
     While {
         cond: Box<Term>,
         body: Box<Term>,
@@ -126,6 +138,13 @@ pub(super) enum TermKind {
 pub(super) struct Annotation<T = Ty> {
     pub ty: T,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParallelParameter {
+    pub binding: DeclarationId,
+    pub pattern: resin_ast::BindingPattern,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]

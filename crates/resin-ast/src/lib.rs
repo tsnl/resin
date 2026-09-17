@@ -108,6 +108,18 @@ pub enum TermKind {
         cond: Box<Term>,
         body: Box<Term>,
     },
+    ParallelMap {
+        input: Box<Term>,
+        element: BindingPattern,
+        body: Box<Term>,
+    },
+    ParallelReduce {
+        input: Box<Term>,
+        identity: Box<Term>,
+        left: BindingPattern,
+        right: BindingPattern,
+        body: Box<Term>,
+    },
     Unwrap {
         value: Box<Term>,
     },

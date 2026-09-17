@@ -743,6 +743,35 @@ impl<'a> AstGen<'a> {
                     span,
                 )
             }
+            "parallel_map_term" => Spanned::new(
+                TermKind::ParallelMap {
+                    input: Box::new(
+                        self.gen_term(child.child_by_field_name("input").unwrap_or(child)),
+                    ),
+                    element: self
+                        .gen_pattern(child.child_by_field_name("element").unwrap_or(child)),
+                    body: Box::new(
+                        self.gen_body(child.child_by_field_name("body").unwrap_or(child)),
+                    ),
+                },
+                span,
+            ),
+            "parallel_reduce_term" => Spanned::new(
+                TermKind::ParallelReduce {
+                    input: Box::new(
+                        self.gen_term(child.child_by_field_name("input").unwrap_or(child)),
+                    ),
+                    identity: Box::new(
+                        self.gen_term(child.child_by_field_name("identity").unwrap_or(child)),
+                    ),
+                    left: self.gen_pattern(child.child_by_field_name("left").unwrap_or(child)),
+                    right: self.gen_pattern(child.child_by_field_name("right").unwrap_or(child)),
+                    body: Box::new(
+                        self.gen_body(child.child_by_field_name("body").unwrap_or(child)),
+                    ),
+                },
+                span,
+            ),
             "while_term" => Spanned::new(
                 TermKind::While {
                     cond: Box::new(
