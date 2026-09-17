@@ -97,7 +97,7 @@ The following stages build on that representation:
    and emits barriers. Leader execution and broadcasts make scalar decisions
    uniform; a group failure flag converges traps before collective exits.
    Nested blocks and helper calls remain serial. The first storage plan uses a
-   conservative portable 32 KiB budget; storage reuse remains future work.
+   conservative portable 16 KiB budget; storage reuse remains future work.
 4. **Optimization and specialized operations:** subgroup reductions, fusion,
    distributed values, and matrix primitives after the baseline schedules agree.
 

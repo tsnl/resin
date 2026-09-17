@@ -95,7 +95,7 @@ retain the shader backend's existing restrictions on merging distinct local
 addresses.
 
 The initial GPU storage plan reserves all group locals rather than minimizing
-lifetimes or fusing operations. It enforces a conservative 32 KiB shared-storage
+lifetimes or fusing operations. It enforces a conservative 16 KiB shared-storage
 budget, counting at least eight bytes per scalar slot and padding. Large batches
 receive a compilation diagnostic. This is a correctness prototype, not an
 optimized parallel-array implementation.

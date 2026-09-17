@@ -49,12 +49,12 @@ impl Context<'_> {
 
     pub(super) fn shared_variable(&mut self, ty: &Ty) -> Result<Word, Error> {
         // The first schedule reserves all group locals. Use a conservative
-        // eight-byte scalar slot (including padding) and Vulkan's portable 32 KiB
+        // eight-byte scalar slot (including padding) and Vulkan's portable 16 KiB
         // floor, instead of relying on driver rejection for excessive scratch.
         let bytes = self
             .shared_size(ty)
             .and_then(|size| self.shared_bytes.checked_add(size));
-        self.shared_bytes = bytes.filter(|size| *size <= 32768).ok_or_else(|| Error::unsupported("compute workgroup storage exceeds the prototype's portable 32 KiB budget; use a smaller batch".into()))?;
+        self.shared_bytes = bytes.filter(|size| *size <= 16384).ok_or_else(|| Error::unsupported("compute workgroup storage exceeds the prototype's portable 16 KiB budget; use a smaller batch".into()))?;
         let pointer = self.pointer_type(StorageClass::Workgroup, ty)?;
         let function = self.builder.selected_function();
         let block = self.builder.selected_block();
