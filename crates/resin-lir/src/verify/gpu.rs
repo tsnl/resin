@@ -85,7 +85,7 @@ pub(super) fn check(
             Ty::Int32
         }
 
-        Instr::GpuArgumentsDispatch | Instr::GpuArgumentsDraw => {
+        Instr::GpuArgumentsTraceRays | Instr::GpuArgumentsDispatch | Instr::GpuArgumentsDraw => {
             expect_type(Ty::GpuArguments, args[0].clone(), location)?;
             expect_type(byte_pointer(), args[1].clone(), location)?;
             for arg in &args[2..] {

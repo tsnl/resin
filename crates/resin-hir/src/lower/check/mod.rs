@@ -501,6 +501,7 @@ impl Checker<'_> {
             "gpu_span_projection",
             "gpu_compute_pipeline_type",
             "gpu_graphics_pipeline_type",
+            "gpu_ray_tracing_pipeline_type",
         ] {
             for declaration in declarations {
                 if !matches!(&declaration.kind, typed::DeclarationKind::Intrinsic { operation: name } if name.as_ref() == operation)

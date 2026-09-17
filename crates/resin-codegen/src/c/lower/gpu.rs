@@ -103,12 +103,17 @@ pub(super) fn instruction(
             args[2].expr, args[3].expr, args[0].expr, args[1].expr
         )),
 
-        Instr::GpuComputePipeline { .. }
+        Instr::GpuRayTracingPipeline { .. }
+        | Instr::GpuComputePipeline { .. }
         | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. }
         | Instr::GpuDraw { .. } => {
             super::pipeline::instruction(types, name, instr, args, result, out)
         }
+        Instr::GpuArgumentsTraceRays => Ok(format!(
+            "resin_gpu_projected_trace_rays((ResinCommandBuffer *){}, {}, {}, {}, {})",
+            args[1].expr, args[0].expr, args[2].expr, args[3].expr, args[4].expr
+        )),
         Instr::GpuArgumentsDispatch => Ok(format!(
             "resin_gpu_projected_dispatch((ResinCommandBuffer *){}, {}, {}, {}, {})",
             args[1].expr, args[0].expr, args[2].expr, args[3].expr, args[4].expr

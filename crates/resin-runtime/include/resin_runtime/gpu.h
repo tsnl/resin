@@ -222,6 +222,17 @@ ResinStatus resin_gpu_submit(ResinGpu *gpu, ResinCommandBuffer *command_buffer);
 /* A non-null command buffer is consumed. Pending image layout changes are discarded. */
 void resin_gpu_cancel_command_buffer(ResinGpu *gpu, ResinCommandBuffer *command_buffer);
 
+
+// Ray tracing is optional. Scene builds copy inputs and complete before returning.
+// Vertices are tightly packed float3; transforms are row-major affine 3x4 matrices.
+typedef struct ResinRayScene ResinRayScene;
+uint32_t resin_gpu_supports_ray_tracing(const ResinGpu *gpu);
+ResinStatus resin_gpu_create_ray_scene(const ResinGpu *gpu, const float *vertices, uint32_t vertex_count, const float *transforms, uint32_t instance_count, ResinRayScene **scene);
+void resin_gpu_free_ray_scene(ResinRayScene *scene);
+ResinStatus resin_gpu_create_ray_pipeline(const ResinGpu *gpu, const ResinRayScene *scene, const uint8_t *generation, size_t generation_length, const uint8_t *miss, size_t miss_length, const uint8_t *hit, size_t hit_length, ResinPipeline **pipeline);
+ResinStatus resin_gpu_trace_rays(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t x, uint32_t y, uint32_t z);
+ResinStatus resin_gpu_projected_trace_rays(ResinCommandBuffer *commands, ResinArc *projection, uint32_t x, uint32_t y, uint32_t z);
+
 #ifdef __cplusplus
 }
 #endif

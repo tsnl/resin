@@ -15,7 +15,41 @@ pub(super) fn check_instr(
     location: Location,
 ) -> Result<(), VerifyError> {
     match instr {
-        Instr::GpuComputePipeline { .. }
+        Instr::TraceRay { payload } => {
+            if function.profile != crate::Profile::Shader {
+                return Err(location.error(VerifyErrorKind::InvalidGpuOperation));
+            }
+            resin_types::shader::ray_payload(&module.types, payload)
+                .map_err(|_| location.error(VerifyErrorKind::InvalidGpuOperation))?;
+            let args = pop(stack, 9, location)?;
+            let mut params = vec![Ty::Float32; 8];
+            params.push(payload.clone());
+            expect_types(&params, &args, location)?;
+            stack.push(payload.clone());
+        }
+        Instr::RayHitInfo => {
+            if function.profile != crate::Profile::Shader {
+                return Err(location.error(VerifyErrorKind::InvalidGpuOperation));
+            }
+            stack.push(Ty::Record {
+                fields: [
+                    Ty::Float32,
+                    Ty::UInt32,
+                    Ty::UInt32,
+                    Ty::Float32,
+                    Ty::Float32,
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| RecordField {
+                    name: format!("_{i}").into(),
+                    ty,
+                })
+                .collect(),
+            });
+        }
+        Instr::GpuRayTracingPipeline { .. }
+        | Instr::GpuComputePipeline { .. }
         | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. }
         | Instr::GpuDraw { .. } => {
@@ -32,6 +66,7 @@ pub(super) fn check_instr(
         | Instr::GpuViewCopyTo
         | Instr::GpuViewCopyFrom
         | Instr::GpuViewCopyImage
+        | Instr::GpuArgumentsTraceRays
         | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw => super::gpu::check(module, instr, stack, location)?,
         Instr::ForgetLocal { local } | Instr::DropLocal { local } | Instr::TakeLocal { local } => {

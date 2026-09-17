@@ -23,6 +23,7 @@ pub struct DeviceContext {
     pub max_buffer_size: vk::DeviceSize,
     pub compute_workgroup_size: u32,
     pub memory_priority: bool,
+    pub ray_tracing: bool,
 }
 
 pub fn create_device() -> Result<DeviceContext, ResinStatus> {
@@ -130,6 +131,33 @@ fn finish_device(
         .queue_priorities(&queue_priorities);
 
     let mut enabled_extensions = selected.optional_extensions.clone();
+    let mut acceleration = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
+    let mut ray = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
+    let extensions = unsafe { instance.enumerate_device_extension_properties(selected.physical) }
+        .unwrap_or_default();
+    let ray_extensions = [
+        vk::KHR_ACCELERATION_STRUCTURE_NAME,
+        vk::KHR_RAY_TRACING_PIPELINE_NAME,
+        vk::KHR_DEFERRED_HOST_OPERATIONS_NAME,
+    ];
+    let mut ray_tracing = ray_extensions
+        .iter()
+        .all(|name| has_extension(&extensions, name));
+    if ray_tracing {
+        let mut features = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut acceleration)
+            .push_next(&mut ray);
+        unsafe { instance.get_physical_device_features2(selected.physical, &mut features) };
+        ray_tracing =
+            acceleration.acceleration_structure == vk::TRUE && ray.ray_tracing_pipeline == vk::TRUE;
+    }
+    acceleration = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
+        .acceleration_structure(ray_tracing);
+    ray = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default()
+        .ray_tracing_pipeline(ray_tracing);
+    if ray_tracing {
+        enabled_extensions.extend(ray_extensions.iter().map(|name| name.as_ptr()));
+    }
     enabled_extensions.push(KHR_MAINTENANCE8_NAME.as_ptr());
     if surface.is_some() {
         enabled_extensions.extend([
@@ -151,6 +179,9 @@ fn finish_device(
         .push_next(&mut vulkan12)
         .push_next(&mut vulkan13)
         .push_next(&mut maintenance8);
+    if ray_tracing {
+        features2 = features2.push_next(&mut acceleration).push_next(&mut ray);
+    }
     if selected.memory_priority_enabled {
         features2 = features2.push_next(&mut memory_priority);
         if selected.pageable_enabled {
@@ -188,6 +219,7 @@ fn finish_device(
         max_buffer_size: selected.max_buffer_size,
         compute_workgroup_size: selected.compute_workgroup_size,
         memory_priority: selected.memory_priority_enabled,
+        ray_tracing,
     })
 }
 
@@ -305,7 +337,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     {
         return None;
     }
-    if properties.limits.max_push_constants_size < 8 {
+    if properties.limits.max_push_constants_size < 16 {
         return None;
     }
 

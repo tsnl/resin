@@ -237,6 +237,31 @@ pub unsafe extern "C" fn resin_gpu_projection_pointer(
 /// Non-null arguments must identify live objects. The projection must be fully
 /// constructed and match the bound shader; operations require synchronization.
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projected_trace_rays(
+    commands: *mut ResinCommandBuffer,
+    projection: *mut ResinArc,
+    group_count_x: u32,
+    group_count_y: u32,
+    group_count_z: u32,
+) -> ResinStatus {
+    unsafe {
+        gpu_view::projected_trace_rays(
+            commands,
+            projection,
+            group_count_x,
+            group_count_y,
+            group_count_z,
+        )
+    }
+}
+
+/// Record a projected dispatch. Success retains the projection and prevents
+/// CPU accesses to its allocations until completion or cancellation.
+///
+/// # Safety
+/// Non-null arguments must identify live objects. The projection must be fully
+/// constructed and match the bound shader; operations require synchronization.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn resin_gpu_projected_dispatch(
     commands: *mut ResinCommandBuffer,
     projection: *mut ResinArc,
@@ -1333,3 +1358,125 @@ void main() {
 }
 
 mod representation;
+
+/// An immutable triangle mesh and its affine instances. The GPU must outlive it.
+/// Pipelines retain the native scene independently of this handle.
+pub struct ResinRayScene {
+    pub(crate) scene: std::rc::Rc<gpu::ray::Scene>,
+}
+
+/// # Safety
+/// A non-null GPU must be live and externally synchronized.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_supports_ray_tracing(gpu: *const ResinGpu) -> u32 {
+    unsafe { gpu.as_ref() }.is_some_and(ResinGpu::supports_ray_tracing) as u32
+}
+
+/// # Safety
+/// Inputs contain `vertex_count * 3` and `instance_count * 12` readable floats.
+/// The GPU and output pointer must be live. GPU operations require synchronization.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_create_ray_scene(
+    gpu: *const ResinGpu,
+    vertices: *const f32,
+    vertex_count: u32,
+    transforms: *const f32,
+    instance_count: u32,
+    output: *mut *mut ResinRayScene,
+) -> ResinStatus {
+    if output.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe { *output = ptr::null_mut() };
+    if gpu.is_null()
+        || vertices.is_null()
+        || transforms.is_null()
+        || vertex_count == 0
+        || instance_count == 0
+    {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe {
+        write_owned_result(
+            (&*gpu).create_ray_scene(
+                std::slice::from_raw_parts(vertices, vertex_count as usize * 3),
+                std::slice::from_raw_parts(transforms, instance_count as usize * 12),
+            ),
+            &mut *output,
+        )
+    }
+}
+
+/// # Safety
+/// A non-null scene must be live and destroyed once, before destroying its GPU.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_free_ray_scene(scene: *mut ResinRayScene) {
+    if !scene.is_null() {
+        unsafe { drop(Box::from_raw(scene)) };
+    }
+}
+
+/// # Safety
+/// The scene belongs to the live GPU. Shader spans contain valid SPIR-V with
+/// matching root/payload interfaces. The output pointer must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_create_ray_pipeline(
+    gpu: *const ResinGpu,
+    scene: *const ResinRayScene,
+    generation: *const u8,
+    generation_length: usize,
+    miss: *const u8,
+    miss_length: usize,
+    hit: *const u8,
+    hit_length: usize,
+    output: *mut *mut ResinPipeline,
+) -> ResinStatus {
+    if output.is_null() {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe { *output = ptr::null_mut() };
+    if gpu.is_null()
+        || scene.is_null()
+        || generation.is_null()
+        || miss.is_null()
+        || hit.is_null()
+        || generation_length == 0
+        || miss_length == 0
+        || hit_length == 0
+    {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe {
+        write_owned_result(
+            (&*gpu).create_ray_pipeline(
+                &*scene,
+                [
+                    std::slice::from_raw_parts(generation, generation_length),
+                    std::slice::from_raw_parts(miss, miss_length),
+                    std::slice::from_raw_parts(hit, hit_length),
+                ],
+            ),
+            &mut *output,
+        )
+    }
+}
+
+/// # Safety
+/// Commands must be live and have a ray pipeline bound. All shader-accessed
+/// addresses must belong to its GPU and remain live through submission.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_trace_rays(
+    commands: *mut ResinCommandBuffer,
+    root: u64,
+    x: u32,
+    y: u32,
+    z: u32,
+) -> ResinStatus {
+    let Some(commands) = (unsafe { commands.as_mut() }) else {
+        return ResinStatus::InvalidArgument;
+    };
+    match unsafe { commands.trace_rays(root, x, y, z) } {
+        Ok(()) => ResinStatus::Success,
+        Err(error) => error,
+    }
+}

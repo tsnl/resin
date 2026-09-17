@@ -104,15 +104,19 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
         | Instr::Eliminate { .. }
         | Instr::NumericCast { .. }
         | Instr::PointerCast { .. } => StackEffect { pops: 1, pushes: 1 },
-        Instr::GpuComputePipeline { .. } | Instr::GpuGraphicsPipeline { .. } => {
-            StackEffect { pops: 1, pushes: 1 }
-        }
+        Instr::GpuRayTracingPipeline { .. }
+        | Instr::GpuComputePipeline { .. }
+        | Instr::GpuGraphicsPipeline { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::GpuDispatch { .. } => StackEffect { pops: 6, pushes: 1 },
         Instr::GpuDraw { .. } | Instr::PointerRange => StackEffect { pops: 4, pushes: 1 },
         Instr::OwnerCreate { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::PointerBytes | Instr::OwnerAllocate { .. } => StackEffect { pops: 2, pushes: 1 },
         Instr::PointerIndex | Instr::GpuArgumentsDraw => StackEffect { pops: 3, pushes: 1 },
-        Instr::GpuArgumentsDispatch => StackEffect { pops: 5, pushes: 1 },
+        Instr::TraceRay { .. } => StackEffect { pops: 9, pushes: 1 },
+        Instr::RayHitInfo => StackEffect { pops: 0, pushes: 1 },
+        Instr::GpuArgumentsTraceRays | Instr::GpuArgumentsDispatch => {
+            StackEffect { pops: 5, pushes: 1 }
+        }
         Instr::AccessDynamic | Instr::Store | Instr::Replace => StackEffect { pops: 2, pushes: 1 },
         Instr::ForgetLocal { .. } | Instr::DropLocal { .. } => StackEffect { pops: 0, pushes: 0 },
         Instr::Discard | Instr::SetLocal { .. } | Instr::SetField { .. } => {

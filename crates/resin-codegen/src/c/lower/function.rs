@@ -157,10 +157,12 @@ fn lower_region(
                     | Instr::GpuViewCopyTo
                     | Instr::GpuViewCopyFrom
                     | Instr::GpuViewCopyImage
+                    | Instr::GpuRayTracingPipeline { .. }
                     | Instr::GpuComputePipeline { .. }
                     | Instr::GpuGraphicsPipeline { .. }
                     | Instr::GpuDispatch { .. }
                     | Instr::GpuDraw { .. }
+                    | Instr::GpuArgumentsTraceRays
                     | Instr::GpuArgumentsDispatch
                     | Instr::GpuArgumentsDraw
             ) || projected_value;
@@ -440,6 +442,9 @@ fn instruction(
     out: &mut String,
 ) -> Result<Option<String>, Error> {
     let expr = match instr {
+        Instr::TraceRay { .. } | Instr::RayHitInfo => {
+            return Err(Error::unsupported("ray operations require a shader".into()));
+        }
         Instr::GpuViewAllocate
         | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
@@ -450,10 +455,12 @@ fn instruction(
         | Instr::GpuViewCopyTo
         | Instr::GpuViewCopyFrom
         | Instr::GpuViewCopyImage
+        | Instr::GpuRayTracingPipeline { .. }
         | Instr::GpuComputePipeline { .. }
         | Instr::GpuGraphicsPipeline { .. }
         | Instr::GpuDispatch { .. }
         | Instr::GpuDraw { .. }
+        | Instr::GpuArgumentsTraceRays
         | Instr::GpuArgumentsDispatch
         | Instr::GpuArgumentsDraw => {
             super::gpu::instruction(types, temp, instr, args, result.unwrap(), out)?

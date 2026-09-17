@@ -137,6 +137,19 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
         Instr::GpuViewCopyTo => symbol("gpu-view-copy-to"),
         Instr::GpuViewCopyFrom => symbol("gpu-view-copy-from"),
         Instr::GpuViewCopyImage => symbol("gpu-view-copy-image"),
+        Instr::GpuRayTracingPipeline {
+            factory,
+            ray_generation,
+            miss,
+            closest_hit,
+            ..
+        } => list(
+            "gpu-ray-tracing-pipeline",
+            [factory, ray_generation, miss, closest_hit]
+                .iter()
+                .map(|id| symbol(names.functions[id.index()].as_ref()))
+                .collect(),
+        ),
         Instr::GpuComputePipeline {
             factory, shader, ..
         } => list(
@@ -187,6 +200,9 @@ fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
                 symbol(names.functions[record.index()].as_ref()),
             ],
         ),
+        Instr::TraceRay { payload } => list("trace-ray", vec![sexp_ty(names, payload)]),
+        Instr::RayHitInfo => symbol("ray-hit-info"),
+        Instr::GpuArgumentsTraceRays => symbol("gpu-trace-rays"),
         Instr::GpuArgumentsDispatch => symbol("gpu-dispatch"),
         Instr::GpuArgumentsDraw => symbol("gpu-draw"),
         Instr::TransferLoad => symbol("transfer-load"),

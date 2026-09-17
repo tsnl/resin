@@ -114,6 +114,7 @@ pub struct GpuPipeline {
 pub enum GpuPipelineKind {
     Compute,
     Graphics,
+    RayTracing,
 }
 
 /// The explicitly registered conversion from a source GPU wrapper to shader storage.
@@ -466,6 +467,8 @@ impl Ty {
 /// Primitive operations selected by compiler methods or explicit intrinsic declarations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
+    TraceRay,
+    RayHitInfo,
     GpuPointerProjection,
     GpuSequenceProjection,
     GpuPipelineType,
@@ -498,6 +501,7 @@ pub enum Intrinsic {
     Cos,
     Replace,
     Index,
+    GpuArgumentsTraceRays,
     GpuArgumentsDispatch,
     GpuArgumentsDraw,
 }
@@ -1009,6 +1013,12 @@ pub mod shader {
     /// A checked stage interface, shared by declaration checking and shader emission.
     #[derive(Debug, Clone)]
     pub enum Interface {
+        RayGeneration {
+            index: Ty,
+        },
+        RayHit {
+            payload: Ty,
+        },
         Compute {
             index: Ty,
         },
@@ -1047,6 +1057,10 @@ pub mod shader {
 
     /// Concrete value/storage types admitted by the shader profile. Managed reference
     /// fields are opaque; copying or destroying them is a separate operation restriction.
+    pub fn ray_payload(definitions: &[super::TypeDef], ty: &Ty) -> Result<(), String> {
+        super::typer::ray_payload(definitions, ty)
+    }
+
     pub fn value_type(definitions: &[super::TypeDef], ty: &Ty) -> Result<(), String> {
         super::typer::shader_value_type(definitions, ty)
     }
@@ -1063,6 +1077,9 @@ pub mod shader {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Stage {
+        RayGeneration,
+        Miss,
+        ClosestHit,
         Compute,
         Vertex,
         Fragment,
@@ -1073,6 +1090,9 @@ pub mod shader {
 
         fn from_str(name: &str) -> Result<Self, Self::Err> {
             match name {
+                "ray_generation" => Ok(Self::RayGeneration),
+                "miss" => Ok(Self::Miss),
+                "closest_hit" => Ok(Self::ClosestHit),
                 "compute" => Ok(Self::Compute),
                 "vertex" => Ok(Self::Vertex),
                 "fragment" => Ok(Self::Fragment),
@@ -1084,6 +1104,9 @@ pub mod shader {
     impl Stage {
         pub fn name(self) -> &'static str {
             match self {
+                Self::RayGeneration => "ray_generation",
+                Self::Miss => "miss",
+                Self::ClosestHit => "closest_hit",
                 Self::Compute => "compute",
                 Self::Vertex => "vertex",
                 Self::Fragment => "fragment",
@@ -1091,6 +1114,9 @@ pub mod shader {
         }
         pub fn entry(self) -> &'static str {
             match self {
+                Self::RayGeneration => "ray_generation",
+                Self::Miss => "miss",
+                Self::ClosestHit => "closest_hit",
                 Self::Compute => "kernel",
                 Self::Vertex => "vertex",
                 Self::Fragment => "fragment",

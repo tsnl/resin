@@ -238,11 +238,11 @@ pub(crate) enum FunctionBody {
     Ordinary,
     GpuPipelineFactory {
         factory: FunctionId,
-        graphics: bool,
+        kind: resin_types::GpuPipelineKind,
     },
     GpuPipelineRecord {
         record: FunctionId,
-        graphics: bool,
+        kind: resin_types::GpuPipelineKind,
     },
     GpuPipelineDispatch {
         context: FunctionId,
@@ -379,7 +379,12 @@ pub(crate) struct IntrinsicMethod {
 pub(crate) fn is_primitive_operation(name: &str) -> bool {
     matches!(
         name,
-        "at" | "at_mut" | "lea" | "replace" | "dispatch_native" | "draw_native"
+        "at" | "at_mut"
+            | "lea"
+            | "replace"
+            | "dispatch_native"
+            | "trace_rays_native"
+            | "draw_native"
     )
 }
 
@@ -427,6 +432,20 @@ pub(crate) fn intrinsic_methods(
     };
     if matches!(base, Type::Node(Head::Atom(Ty::GpuArguments), _)) {
         methods.extend([
+            (
+                "trace_rays_native",
+                IntrinsicMethod {
+                    op: Intrinsic::GpuArgumentsTraceRays,
+                    params: vec![
+                        base.clone(),
+                        Type::pointer(Ty::UInt8.into()),
+                        Ty::UInt32.into(),
+                        Ty::UInt32.into(),
+                        Ty::UInt32.into(),
+                    ],
+                    result: Ty::Int32.into(),
+                },
+            ),
             (
                 "dispatch_native",
                 IntrinsicMethod {
@@ -534,6 +553,32 @@ pub(super) fn primitive_signature(
             .collect(),
     };
     Some(match (operation, parameters) {
+        ("trace_ray", [payload]) => (
+            Intrinsic::TraceRay,
+            vec![
+                Type::Float32,
+                Type::Float32,
+                Type::Float32,
+                Type::Float32,
+                Type::Float32,
+                Type::Float32,
+                Type::Float32,
+                Type::Float32,
+                payload.clone(),
+            ],
+            payload.clone(),
+        ),
+        ("ray_hit_info", []) => (
+            Intrinsic::RayHitInfo,
+            vec![],
+            record(&[
+                ("_0", Type::Float32),
+                ("_1", Type::UInt32),
+                ("_2", Type::UInt32),
+                ("_3", Type::Float32),
+                ("_4", Type::Float32),
+            ]),
+        ),
         ("pointer_index", [element]) => (
             Intrinsic::PointerIndex,
             vec![pointer(element.clone()), Type::UInt64, Type::UInt64],

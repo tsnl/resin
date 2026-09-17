@@ -114,7 +114,26 @@ impl<'a> Instances<'a> {
                     )
                     .into());
             }
-            if function.signature.type_params.is_empty() {
+            let ray_stage = self
+                .source
+                .shaders
+                .get(&FunctionId::from_index(index))
+                .is_some_and(|shader| {
+                    matches!(
+                        shader.stage.as_ref(),
+                        "ray_generation" | "miss" | "closest_hit"
+                    )
+                });
+            let ray_intrinsic = function.body.as_ref().is_some_and(|body| {
+                matches!(
+                    body.kind,
+                    resin_hir::TermKind::Intrinsic {
+                        op: resin_types::Intrinsic::TraceRay | resin_types::Intrinsic::RayHitInfo,
+                        ..
+                    }
+                )
+            });
+            if function.signature.type_params.is_empty() && !ray_stage && !ray_intrinsic {
                 self.request(
                     FunctionId::from_index(index),
                     vec![],

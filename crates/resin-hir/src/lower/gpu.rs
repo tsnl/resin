@@ -11,9 +11,11 @@ pub(super) fn is_bridge(name: &str) -> bool {
         "gpu_allocator"
             | "gpu_compute_pipeline"
             | "gpu_graphics_pipeline"
+            | "gpu_ray_tracing_pipeline"
             | "gpu_pipeline_context"
             | "gpu_dispatch"
             | "gpu_draw"
+            | "gpu_trace_rays"
     )
 }
 
@@ -131,25 +133,37 @@ fn bridge_body(
     let (value, _) = declaration.result.fallible_parts()?;
     let bytes = Ty::byte_span();
     match name {
-        "gpu_compute_pipeline" | "gpu_graphics_pipeline" => {
-            let graphics = name == "gpu_graphics_pipeline";
-            let count = if graphics { 2 } else { 1 };
+        "gpu_compute_pipeline" | "gpu_graphics_pipeline" | "gpu_ray_tracing_pipeline" => {
+            let kind = match name {
+                "gpu_compute_pipeline" => resin_types::GpuPipelineKind::Compute,
+                "gpu_graphics_pipeline" => resin_types::GpuPipelineKind::Graphics,
+                _ => resin_types::GpuPipelineKind::RayTracing,
+            };
+            let count = match kind {
+                resin_types::GpuPipelineKind::Compute => 1,
+                resin_types::GpuPipelineKind::Graphics => 2,
+                resin_types::GpuPipelineKind::RayTracing => 3,
+            };
             (matches!(*value, Ty::Defined { .. })
                 && params.len() == count + 1
                 && params[1..].iter().all(|ty| *ty == bytes))
             .then_some(FunctionBody::GpuPipelineFactory {
                 factory: function,
-                graphics,
+                kind,
             })
         }
-        "gpu_dispatch" | "gpu_draw" => {
-            let graphics = name == "gpu_draw";
-            let root = if graphics {
+        "gpu_dispatch" | "gpu_draw" | "gpu_trace_rays" => {
+            let kind = match name {
+                "gpu_dispatch" => resin_types::GpuPipelineKind::Compute,
+                "gpu_draw" => resin_types::GpuPipelineKind::Graphics,
+                _ => resin_types::GpuPipelineKind::RayTracing,
+            };
+            let root = if kind == resin_types::GpuPipelineKind::Graphics {
                 Ty::union_of([Ty::GpuArguments, Ty::None])
             } else {
                 Ty::GpuArguments
             };
-            let tail = if graphics {
+            let tail = if kind == resin_types::GpuPipelineKind::Graphics {
                 vec![root, Ty::UInt32]
             } else {
                 vec![root, Ty::UInt32, Ty::UInt32, Ty::UInt32]
@@ -161,7 +175,7 @@ fn bridge_body(
                 && params.get(2..) == Some(tail.as_slice()))
             .then_some(FunctionBody::GpuPipelineRecord {
                 record: function,
-                graphics,
+                kind,
             })
         }
         _ => None,
@@ -188,30 +202,34 @@ impl Context {
         };
         let (value, error) = method.result.fallible_parts()?;
         match method.body {
-            FunctionBody::GpuPipelineFactory { graphics, .. } => {
-                let (_, pipeline) = self.source_pipeline_type(graphics)?;
-                let kind = &pipeline.name;
-                let shaders = if graphics {
+            FunctionBody::GpuPipelineFactory { kind, .. } => {
+                let (_, pipeline) = self.source_pipeline_type(kind)?;
+                let label_kind = &pipeline.name;
+                let shaders = if kind == resin_types::GpuPipelineKind::Graphics {
                     "vertex: @vertex_shader, fragment: @fragment_shader"
                 } else {
-                    "shader: @compute_shader"
+                    if kind == resin_types::GpuPipelineKind::RayTracing {
+                        "ray_generation: @ray_generation_shader, miss: @miss_shader, closest_hit: @closest_hit_shader"
+                    } else {
+                        "shader: @compute_shader"
+                    }
                 };
                 Some(format!(
-                    "({receiver}{shaders}) -> ({kind}<T, {}> | Err<{}>)",
+                    "({receiver}{shaders}) -> ({label_kind}<T, {}> | Err<{}>)",
                     label(value),
                     label(error)
                 ))
             }
-            FunctionBody::GpuPipelineRecord { graphics, .. } => {
-                let (_, pipeline) = self.source_pipeline_type(graphics)?;
-                let kind = &pipeline.name;
-                let dimensions = if graphics {
+            FunctionBody::GpuPipelineRecord { kind, .. } => {
+                let (_, pipeline) = self.source_pipeline_type(kind)?;
+                let label_kind = &pipeline.name;
+                let dimensions = if kind == resin_types::GpuPipelineKind::Graphics {
                     "count: u32"
                 } else {
                     "x: u32, y: u32, z: u32"
                 };
                 Some(format!(
-                    "({receiver}pipeline: {kind}<T, {}>, arguments: _, {dimensions}) -> {}",
+                    "({receiver}pipeline: {label_kind}<T, {}>, arguments: _, {dimensions}) -> {}",
                     label(&method.params[1]),
                     label(&method.result)
                 ))
@@ -237,22 +255,20 @@ impl Context {
         inputs: &[crate::Type],
     ) -> Result<PipelineMethod, String> {
         match method.body {
-            FunctionBody::GpuPipelineFactory { factory, graphics } => {
-                self.source_pipeline_factory(factory, graphics, inputs)
+            FunctionBody::GpuPipelineFactory { factory, kind } => {
+                self.source_pipeline_factory(factory, kind, inputs)
             }
-            FunctionBody::GpuPipelineRecord { record, graphics } => {
-                self.source_pipeline_record(record, graphics, inputs)
+            FunctionBody::GpuPipelineRecord { record, kind } => {
+                self.source_pipeline_record(record, kind, inputs)
             }
             _ => unreachable!("pipeline bridge"),
         }
     }
 
-    fn source_pipeline_type(&self, graphics: bool) -> Option<(TypeId, &crate::TypeDefinition)> {
-        let kind = if graphics {
-            resin_types::GpuPipelineKind::Graphics
-        } else {
-            resin_types::GpuPipelineKind::Compute
-        };
+    fn source_pipeline_type(
+        &self,
+        kind: resin_types::GpuPipelineKind,
+    ) -> Option<(TypeId, &crate::TypeDefinition)> {
         self.nominal_schemes.iter().find_map(|(id, source)| {
             source
                 .gpu_pipeline
@@ -265,11 +281,15 @@ impl Context {
     fn source_pipeline_factory(
         &self,
         factory: FunctionId,
-        graphics: bool,
+        kind: resin_types::GpuPipelineKind,
         shaders: &[crate::Type],
     ) -> Result<PipelineMethod, String> {
         use crate::Type;
-        let count = if graphics { 2 } else { 1 };
+        let count = match kind {
+            resin_types::GpuPipelineKind::Compute => 1,
+            resin_types::GpuPipelineKind::Graphics => 2,
+            resin_types::GpuPipelineKind::RayTracing => 3,
+        };
         if shaders.len() != count {
             return Err("pipeline creation requires direct shader declarations".into());
         }
@@ -283,7 +303,7 @@ impl Context {
                     return Err("vertex and fragment shaders must use the same root type".into());
                 }
                 root = *pointee.clone();
-            } else if !graphics {
+            } else if kind != resin_types::GpuPipelineKind::Graphics {
                 return Err("compute shader root parameter must be a pointer".into());
             }
         }
@@ -293,7 +313,7 @@ impl Context {
             .fallible_parts()
             .expect("validated pipeline factory");
         let (definition, _) = self
-            .source_pipeline_type(graphics)
+            .source_pipeline_type(kind)
             .ok_or("no source pipeline type is registered for this shader stage")?;
         let value = Type::Defined {
             definition,
@@ -319,7 +339,7 @@ impl Context {
     fn source_pipeline_record(
         &self,
         record: FunctionId,
-        graphics: bool,
+        kind: resin_types::GpuPipelineKind,
         inputs: &[crate::Type],
     ) -> Result<PipelineMethod, String> {
         use crate::Type;
@@ -341,13 +361,9 @@ impl Context {
             .gpu_pipeline
             .as_ref()
             .ok_or("recording requires a registered source pipeline type")?;
-        let expected_kind = if graphics {
-            resin_types::GpuPipelineKind::Graphics
-        } else {
-            resin_types::GpuPipelineKind::Compute
-        };
+        let expected_kind = kind;
         if metadata.kind != expected_kind {
-            return Err(if graphics {
+            return Err(if kind == resin_types::GpuPipelineKind::Graphics {
                 "draw requires a graphics pipeline"
             } else {
                 "dispatch requires a compute pipeline"

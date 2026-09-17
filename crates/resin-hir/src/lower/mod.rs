@@ -1184,6 +1184,9 @@ impl Generator {
 
 fn shader_stage(decorator: &Ident) -> Result<&'static str, GenerateError> {
     match decorator.val.as_ref() {
+        "ray_generation_shader" => Ok("ray_generation"),
+        "miss_shader" => Ok("miss"),
+        "closest_hit_shader" => Ok("closest_hit"),
         "compute_shader" => Ok("compute"),
         "vertex_shader" => Ok("vertex"),
         "fragment_shader" => Ok("fragment"),
