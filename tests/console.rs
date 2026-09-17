@@ -68,7 +68,7 @@ impl Program {
 fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
     let program = Program::new(
         r#"export { main };
-        import { "$/console.resin", "$/string.resin" };
+        import { "$/stdio.resin", "$/string.resin" };
         fn failed(error: InputError) -> (() | Err<InputError>)  { Err(error) }
         fn main() -> (() | Err<_>)  {
             let mut reading = 1 == 1;
@@ -135,7 +135,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
 fn byte_input_distinguishes_bytes_from_eof() {
     let program = Program::new(
         r#"export { main };
-        import { "$/console.resin", "$/string.resin" };
+        import { "$/stdio.resin", "$/string.resin" };
         fn main() -> (int | Err<_>)  {
             let mut zero = console_read_byte()?;
             let mut first = console_read_byte()?;
@@ -192,7 +192,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
                     fn console_test_frees() -> int;
                 }},
             }};
-           import {{ "$/console.resin" }};
+           import {{ "$/stdio.resin" }};
             fn exercise() -> int  {{
                 let mut mode = console_test_mode();
                 match (console_read_line()) {{
@@ -243,7 +243,7 @@ fn failures_release_the_current_buffer_and_report_the_right_error() {
 fn streams_write_literals_and_owned_strings_verbatim() {
     let program = Program::new(
         r#"export { main };
-        import { "$/io.resin", "$/string.resin", "$/span.resin" };
+        import { "$/stdio.resin", "$/string.resin", "$/span.resin" };
         fn literal() -> str  { "static\0bytes" }
         fn main() -> (() | Err<_>)  {
             let mut out = io_stdout();
@@ -269,7 +269,7 @@ fn streams_write_literals_and_owned_strings_verbatim() {
 fn stream_write_failure_propagates_as_a_library_error() {
     let program = Program::new(
         r#"export { main };
-        import { "$/io.resin", "$/string.resin" };
+        import { "$/stdio.resin", "$/string.resin" };
         fn main() -> (() | Err<_>)  {
             Output { stream = 99_ui }:write("unwritten")?;
             print("not reached");

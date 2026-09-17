@@ -329,19 +329,19 @@ fn importing_modules_does_not_execute_their_functions() {
     let project = Project::new(&[
         (
             "base.resin",
-            "import { \"$/string.resin\" }; fn main() -> ()  { print(\"A\"); }",
+            "import { \"$/string.resin\", \"$/stdio.resin\" }; fn main() -> ()  { print(\"A\"); }",
         ),
         (
             "left.resin",
-            "import { \"base.resin\", \"$/string.resin\" }; fn main() -> ()  { print(\"B\"); }",
+            "import { \"base.resin\", \"$/string.resin\", \"$/stdio.resin\" }; fn main() -> ()  { print(\"B\"); }",
         ),
         (
             "right.resin",
-            "import { \"base.resin\", \"$/string.resin\" }; fn main() -> ()  { print(\"C\"); }",
+            "import { \"base.resin\", \"$/string.resin\", \"$/stdio.resin\" }; fn main() -> ()  { print(\"C\"); }",
         ),
         (
             "main.resin",
-            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\", \"$/string.resin\" }; fn main() -> ()  { print(\"D\"); }",
+            "export { main }; import { \"left.resin\", \"right.resin\", \"./base.resin\", \"$/string.resin\", \"$/stdio.resin\" }; fn main() -> ()  { print(\"D\"); }",
         ),
     ]);
     let output = project.run();

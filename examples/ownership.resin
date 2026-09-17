@@ -1,6 +1,6 @@
 export { main, failure };
 
-import { "$/span.resin", "$/string.resin", "$/shared.resin", "$/status.resin" };
+import { "$/span.resin", "$/string.resin", "$/stdio.resin", "$/shared.resin", "$/status.resin" };
 
 struct Failed {}
 

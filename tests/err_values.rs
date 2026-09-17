@@ -4,7 +4,7 @@ use support::{module, pipeline};
 #[test]
 fn error_wrappers_preserve_identity_payloads_and_ownership() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn boxed<T>(value: T) -> Err<T>  { Err(value) }
         fn main()  {
             let mut a: Err<int> = Err(42);
@@ -43,7 +43,7 @@ fn error_wrappers_cannot_hide_reference_payloads() {
 #[test]
 fn error_wrappers_have_distinct_union_tags_and_payload_layouts() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn show(value: int | Err<int>)  { match (value) {
             int(value) => { print(repr(value)) },
             Err<int>(error) => { print(repr(error)) },
@@ -81,7 +81,7 @@ fn shaders_preserve_error_wrapper_identity() {
 #[test]
 fn plain_success_values_and_builtin_errors_propagate() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn read(fail: bool) -> int | Err<str>  { if (fail) { Err("bad input") } else { 42 } }
         fn work(fail: bool) -> int | Err<_>  { read(fail)? + 1 }
         fn main() -> int | Err<_>  {
@@ -106,7 +106,7 @@ fn plain_success_values_and_builtin_errors_propagate() {
 #[test]
 fn propagated_errors_widen_payloads_and_preserve_owned_values() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn failure() -> int | Err<String>  { Err(string_from_str("owned")) }
         fn wider() -> int | Err<str | String>  { failure()? }
         fn main() -> int  { match (wider()) {
@@ -142,7 +142,7 @@ fn entry_point_reports_propagated_error_values() {
 #[test]
 fn inferred_errors_collect_across_plain_returns_and_propagation() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn a() -> int | Err<str>  { Err("text") }
         fn b() -> int | Err<int>  { Err(7) }
         fn choose(flag: bool) -> int | Err<_>  { if (flag) { a() } else { b() } }
@@ -202,7 +202,7 @@ fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 #[test]
 fn one_error_pattern_handles_distinct_error_wrapper_members() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn choice() -> int | Err<str> | Err<int>  { Err<int>(7) }
         fn main()  { match (choice()) {
             Err(value) => { print(repr(value)) },
@@ -253,7 +253,7 @@ fn propagation_checks_every_error_and_keeps_mutable_pointers_invariant() {
 #[test]
 fn error_only_paths_and_recursive_error_sets_complete() {
     let module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn a(n: int) -> int | Err<_>  { if (n == 0) { Err(7_i) } else { b(n - 1)? } }
         fn b(n: int) -> int | Err<_>  { if (n == 0) { Err("text") } else { a(n - 1)? } }
         fn always() -> Err<str>  { Err("always") }

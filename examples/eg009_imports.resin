@@ -1,6 +1,6 @@
 export { main, independent };
 
-import { "$/string.resin", "lib/counter.resin" };
+import { "$/string.resin", "$/stdio.resin", "lib/counter.resin" };
 
 fn main() -> () {
 	let mut counter = Counter { value = 0 };

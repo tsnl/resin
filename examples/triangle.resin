@@ -1,6 +1,6 @@
 export { main, vertex, fragment };
 
-import { "$/string.resin", "$/gpu.resin", "$/graphics.resin", "$/shared.resin", "$/image.resin" };
+import { "$/string.resin", "$/stdio.resin", "$/gpu.resin", "$/graphics.resin", "$/shared.resin", "$/image.resin" };
 
 @vertex_shader
 fn vertex(index: int) -> Vertex {

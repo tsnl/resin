@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/string.resin", "$/shared.resin" };
+import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
 
 struct List {
 	value: int,

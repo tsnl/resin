@@ -1,5 +1,5 @@
 export { main };
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 struct Vec2<T> {
 	x: T,

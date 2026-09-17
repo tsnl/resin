@@ -12,6 +12,7 @@ import {
 	"$/shared.resin",
 	"$/span.resin",
 	"$/string.resin",
+	"$/stdio.resin",
 	"$/gpu.resin",
 	"$/window.resin",
 	"$/graphics.resin",

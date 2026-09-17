@@ -1,8 +1,13 @@
-//! Host byte and line input, with explicit end-of-input and I/O errors.
+//! Standard input, output, and error streams for host programs.
+//! `print` writes verbatim bytes and traps on failure; stream writes and input return error unions.
 
-export { Console, InputLine, InputError, EndOfInput, InputReadError, InputOutOfMemory, InputWriteError, get, bytes, console_print, console_read_byte, console_read_line };
+export { print, Io, Output, WriteError, write, io_stdout, io_stderr, Console, InputLine, InputError, EndOfInput, InputReadError, InputOutOfMemory, InputWriteError, get, bytes, console_print, console_read_byte, console_read_line };
 
 extern {
+	"resin_runtime/print.h": {
+		fn resin_print(data: Ptr<ubyte>, length: ulong);
+		fn resin_stream_write(stream: uint, data: Ptr<ubyte>, length: ulong) -> int;
+	},
 	"stdio.h": {
 		fn getchar() -> int;
 	},
@@ -18,14 +23,76 @@ extern {
 	},
 };
 
-import { "span.resin", "shared.resin" };
+import { "span.resin", "shared.resin", "string.resin" };
+
+//
+// Standard output and error
+//
+
+/// Write literal bytes to stdout, flush, and add no newline.
+/// A write failure terminates the program; use `io_stdout():write(text)` to handle errors.
+fn print(text: str) {
+	resin_print(text.data, text.length)
+}
+
+/// Write a borrowed byte span to stdout without formatting or adding a newline.
+fn print(text: Ref<Span<ubyte>>) {
+	resin_print(text.data, text.length)
+}
+
+/// Write an owned string to stdout while borrowing its storage.
+fn print(text: Ref<String>) {
+	print(text:get())
+}
+
+// Native stream selectors for resin_stream_write.
+const (
+	stream_stdout: uint = iota;
+	stream_stderr: uint = iota;
+);
+
+struct WriteError {}
+struct Output {
+	stream: uint,
+}
+
+// Writes bytes verbatim and flushes. No formatting or newline is added.
+fn write(self: Ref<Output>, text: str) -> () | Err<WriteError> {
+	write(self, bytes(text))
+}
+
+fn write(self: Ref<Output>, text: Ref<String>) -> () | Err<WriteError> {
+	write(self, text:get())
+}
+
+fn write(self: Ref<Output>, text: Ref<Span<ubyte>>) -> () | Err<WriteError> {
+	let status = resin_stream_write(self.stream, text.data, text.length);
+	if (status == 0) {
+		()
+	} else {
+		Err(WriteError {})
+	}
+}
+
+struct Io {}
+fn io_stdout() -> Output {
+	Output { stream = stream_stdout }
+}
+
+fn io_stderr() -> Output {
+	Output { stream = stream_stderr }
+}
+
+//
+// Standard input
+//
 
 const initial_input_capacity = 128_ul;
 const max_input_capacity = ~0_ul;
 const line_feed: int = 10;
 const carriage_return: ubyte = 13;
 
-// Owns length bytes followed by a NUL. Copies retain the allocation.
+// Owns length bytes followed by a NUL. The final shared owner frees the allocation.
 struct InputLineOwner {
 	data: Ptr<ubyte>,
 	length: ulong,
@@ -76,11 +143,8 @@ fn check_input_end(byte: int, length: ulong) -> (() | Err<EndOfInput | InputRead
 	}
 }
 
-struct Console {
-	// Writes every byte (including embedded NULs), flushes, and adds no newline.
-
-	// Reads bytes through LF or EOF, only CR immediately before LF is stripped.
-}
+struct Console {}
+/// Write a borrowed input line verbatim to stdout, flush, and report write failures.
 fn console_print(line: Ref<InputLine>) -> (() | Err<InputWriteError>) {
 	let mut bytes = line:get();
 	let mut index = 0_ul;
@@ -97,12 +161,15 @@ fn console_print(line: Ref<InputLine>) -> (() | Err<InputWriteError>) {
 	}
 }
 
+/// Read one byte, distinguishing EOF from a stream failure.
 fn console_read_byte() -> (ubyte | Err<EndOfInput | InputReadError>) {
 	let mut byte = getchar();
 	check_input_end(byte, 0_ul)?;
 	(resin_console_byte(byte))
 }
 
+/// Read through LF or EOF, stripping the LF and an immediately preceding CR.
+/// The returned owner retains all other bytes and a trailing NUL outside its length.
 fn console_read_line() -> (InputLine | Err<InputError>) {
 	let mut owner = match (arc_ptr_alloc::<InputLineOwner>(InputLineOwner { data = Ptr<ubyte>(0_ul), length = 0_ul })) {
 		ArcPtr<InputLineOwner>(value) => {

@@ -413,8 +413,8 @@ fn string_completions_distinguish_fields_operations_and_free_constructors() {
         (
             2,
             "\"text\":",
-            vec!["at", "print", "bytes"],
-            vec!["data", "length"],
+            vec!["at", "bytes"],
+            vec!["data", "length", "print"],
         ),
         (
             3,

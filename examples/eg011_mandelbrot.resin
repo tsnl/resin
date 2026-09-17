@@ -13,7 +13,7 @@ import {
 	"$/process.resin",
 	"$/image.resin",
 	"$/shared.resin",
-	"$/io.resin",
+	"$/stdio.resin",
 	"mandelbrot/options.resin",
 };
 

@@ -156,7 +156,7 @@ type Record = FieldsNumber<uint>;
 fn unwrapping_none_traps_before_following_side_effects() {
     for value in ["absent", "None"] {
         let output = run(&format!(
-            r#"import {{ "$/string.resin" }};
+            r#"import {{ "$/string.resin", "$/stdio.resin" }};
             fn main() -> int  {{
                 let mut absent: int | None; absent = None;
                 let mut value: int; value = {value}!;

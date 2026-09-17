@@ -9,7 +9,7 @@ fn run(source: &str) -> std::process::Output {
 #[test]
 fn nested_template_calls_use_context_and_preserve_numeric_widths() {
     let output = run(r#"export { main };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         fn identity<T>(value: T) -> _  { value }
         fn increment<T>(value: T) -> T  { value + 1 }
         fn twice<U>(value: U) -> U  { increment(increment(value)) }
@@ -31,7 +31,7 @@ fn nested_template_calls_use_context_and_preserve_numeric_widths() {
 #[test]
 fn template_fields_and_layout_follow_each_nominal_argument() {
     let output = run(r#"export { main };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         struct Small { value: int, }
         struct Large { padding: ulong, value: uint, }
         fn read<T>(value: Ref<T>) -> _  { value.value }

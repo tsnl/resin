@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 struct Point2f {
 	x: float32,

@@ -140,7 +140,7 @@ fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
     ] {
         for (expression, message) in cases {
             let source = format!(
-                r#"export {{ main }}; import {{ "$/span.resin", "$/string.resin", "$/shared.resin" }};
+                r#"export {{ main }}; import {{ "$/span.resin", "$/string.resin", "$/stdio.resin", "$/shared.resin" }};
                 fn main() -> () | Err<_> {{
                     {storage}
                     {expression};

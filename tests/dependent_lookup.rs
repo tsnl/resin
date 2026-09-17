@@ -13,7 +13,7 @@ fn run(source: &str) -> std::process::Output {
 #[test]
 fn dependent_field_and_method_chains_use_each_concrete_owner() {
     let output = run(r#"export { main };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         struct Small { value: int,
             
         }
@@ -102,7 +102,7 @@ fn pass<T, U>(self: Factory<T>, value: U) -> Cell<U>  { Cell<U> { value = value 
 #[test]
 fn dependent_parameters_give_unsuffixed_arguments_their_concrete_types() {
     let output = run(r#"export { main };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         struct Narrow {
             
         }
@@ -132,7 +132,7 @@ fn sum(self: Wide, first: ulong, second: ulong) -> ulong  { first + second }
 #[test]
 fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
     let output = run(r#"export { main };
-        import { "$/string.resin", "$/shared.resin" };
+        import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
         struct Counter { value: int,
             
             

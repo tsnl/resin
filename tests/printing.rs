@@ -39,7 +39,7 @@ fn prints(source: &str, expected: &[u8]) {
 #[test]
 fn print_is_an_ordinary_source_function_returning_unit() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn output(value: str)  { print(value) }
         fn main()  { output("x = "); print(fmt("{0}\n", (42,))); }"#,
         b"x = 42\n",
@@ -47,17 +47,33 @@ fn print_is_an_ordinary_source_function_returning_unit() {
 }
 
 #[test]
+fn printing_and_string_construction_have_separate_module_exports() {
+    prints(
+        r#"export { main }; import { "$/stdio.resin" };
+        fn main() { print("hello\0world"); }"#,
+        b"hello\0world",
+    );
+    for source in [
+        r#"import { "$/string.resin" }; fn main() { print("unexpected"); }"#,
+        r#"import { "$/stdio.resin" }; fn main() { fmt("unexpected", ()); }"#,
+    ] {
+        let error = pipeline::source_module(source).unwrap_err();
+        assert!(error.to_string().contains("UnboundValue"), "{error}");
+    }
+}
+
+#[test]
 fn formats_are_length_delimited_and_do_not_add_newlines() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(""); print("héllo\t\"\\\r\n\0%"); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(""); print("héllo\t\"\\\r\n\0%"); }"#,
         "héllo\t\"\\\r\n\0%".as_bytes(),
     );
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("{{{1}}}: {0}, {1}", ("{not a format}%\0", "世界"))); }"#,
         "{世界}: {not a format}%\0, 世界".as_bytes(),
     );
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main () -> ()  { let mut format_text = "{0}!"; print(fmt(format_text, ("",))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main () -> ()  { let mut format_text = "{0}!"; print(fmt(format_text, ("",))); }"#,
         b"!",
     );
 }
@@ -81,7 +97,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
                 fn strlen(text: Ptr<ubyte>) -> ulong;
             },
         };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
 
         struct FieldsText<T0> { text: T0, }
 fn main() -> int  {
@@ -110,7 +126,7 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
                 fn strlen(text: Ptr<ubyte>) -> ulong;
             },
         };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
 
         fn main() -> int  {
             let mut text = "a\0b\0";
@@ -124,14 +140,14 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/span.resin" }; fn main() -> () | Err<_> { let buffer_owner = arc_ptr_alloc([ubyte(65), ubyte(0), ubyte(66), ubyte(0)])?; let buffer: Ref<_> = buffer_owner:get().*; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(buffer_owner:get()), length = 4_ul }:bytes(),))); }"#,
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> { let buffer_owner = arc_ptr_alloc([ubyte(65), ubyte(0), ubyte(66), ubyte(0)])?; let buffer: Ref<_> = buffer_owner:get().*; print(fmt("{0}", (Span<ubyte> { data = Ptr<ubyte>(buffer_owner:get()), length = 4_ul }:bytes(),))); }"#,
         b"A\0B\0",
     );
 }
 
 #[test]
 fn numeric_widths_and_scalar_types() {
-    prints(r#"export { main }; import { "$/string.resin" };
+    prints(r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
 
 fn main() -> ()  {
     print(fmt("{0} {1} {2} {3} {4} {5} {6} {7}\n", (
@@ -146,7 +162,7 @@ fn main() -> ()  {
 #[test]
 fn aliases_preserve_scalar_printing() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; type Meters = int; type Distance = Meters; fn main() -> ()  { print(fmt("{0}", (Distance(Meters(42)),))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; type Meters = int; type Distance = Meters; fn main() -> ()  { print(fmt("{0}", (Distance(Meters(42)),))); }"#,
         b"42",
     );
 }
@@ -154,7 +170,7 @@ fn aliases_preserve_scalar_printing() {
 #[test]
 fn arguments_evaluate_once_in_source_order_even_when_unused() {
     prints(
-        r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { let mut n = 0; print(fmt("{1} {0} {1}", ({ n = n + 1; n }, { n = n + 1; n }, { n = n + 1; n }))); print(fmt(" {0}", (n,))); }"#,
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { let mut n = 0; print(fmt("{1} {0} {1}", ({ n = n + 1; n }, { n = n + 1; n }, { n = n + 1; n }))); print(fmt(" {0}", (n,))); }"#,
         b"2 1 2 3",
     );
 }
@@ -162,7 +178,7 @@ fn arguments_evaluate_once_in_source_order_even_when_unused() {
 #[test]
 fn ordinary_and_recursive_functions_can_print() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn show (n: int) -> ()  { print(fmt("{0}", (n,))); }
         fn countdown (n: int) -> int  { print(fmt("{0}", (n,))); if (n > 0) { countdown(n - 1) } else { 0 } }
         fn main () -> int  {
@@ -177,14 +193,16 @@ fn ordinary_and_recursive_functions_can_print() {
 
 #[test]
 fn imported_print_can_be_shadowed_by_a_local_or_parameter() {
-    let output = run(r#"export { main }; import { "$/string.resin" };
+    let output = run(
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn increment(value: int) -> int  { value + 1 }
         fn apply(print: (int) -> int) -> int  { print(41) }
         fn main() -> int  {
             let mut print = 7;
             if (print == 7 && apply(increment) == 42) { 0 } else { 1 }
         }
-    "#);
+    "#,
+    );
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
 }
@@ -201,14 +219,14 @@ fn invalid_formats_fail_before_writing() {
         "prefix {99999999999999999999999999}",
     ] {
         let output = run(&format!(
-            "export {{ main }}; import {{ \"$/string.resin\" }}; fn main() -> ()  {{ print(fmt({format:?}, (42,))); }}"
+            "export {{ main }}; import {{ \"$/string.resin\", \"$/stdio.resin\" }}; fn main() -> ()  {{ print(fmt({format:?}, (42,))); }}"
         ));
         assert_eq!(output.status.code(), Some(1), "{format}");
         assert!(output.stdout.is_empty(), "{format}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("resin:"));
     }
     assert_eq!(
-        run(r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", ())); }"#)
+        run(r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("{0}", ())); }"#)
             .status
             .code(),
         Some(1)
@@ -219,19 +237,19 @@ fn invalid_formats_fail_before_writing() {
 fn invalid_print_types_are_rejected() {
     for (source, diagnostic) in [
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", 1)); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("{0}", 1)); }"#,
             "InvalidFormatArguments",
         ),
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt(1, (2,))); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt(1, (2,))); }"#,
             "no overload of `fmt` matches",
         ),
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("hello")); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("hello")); }"#,
             "no overload of `fmt` matches",
         ),
         (
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print(fmt("{0}", (1,), (2,))); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print(fmt("{0}", (1,), (2,))); }"#,
             "no overload of `fmt` matches",
         ),
     ] {
@@ -243,7 +261,7 @@ fn invalid_print_types_are_rejected() {
 #[test]
 fn shader_print_rejects_host_only_string_types() {
     let error = pipeline::shader_error(
-        r#"export { kernel }; import { "$/string.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: ulong, text: Ptr<Span<ubyte>>)  { print(text.*); }"#,
+        r#"export { kernel }; import { "$/string.resin", "$/stdio.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: ulong, text: Ptr<Span<ubyte>>)  { print(text.*); }"#,
     );
     assert!(
         error.contains("shader cannot call foreign function resin_print"),
@@ -255,7 +273,7 @@ fn shader_print_rejects_host_only_string_types() {
 fn generated_c_uses_the_shared_runtime_header() {
     let project = support::project::Project::new(
         &module(
-            r#"export { main }; import { "$/string.resin" }; fn main() -> ()  { print("hello"); }"#,
+            r#"export { main }; import { "$/string.resin", "$/stdio.resin" }; fn main() -> ()  { print("hello"); }"#,
         ),
         Some("main"),
     )
@@ -298,7 +316,7 @@ fn c_runtime_accepts_empty_buffers_and_pointer_values() {
 #[test]
 fn formatted_strings_retain_storage_and_release_the_last_owner() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/shared.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
         fn make() -> String  { fmt("{0}\0{1}", ("hi", 42)) }
         fn main() -> int  {
             let mut weak = weak_span_empty::<ubyte>();
@@ -330,7 +348,7 @@ fn literal_strings_survive_returns_and_keep_explicit_nuls() {
                 fn strlen(p: Ptr<ubyte>) -> ulong;
             },
         };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         fn literal() -> str  { "a\0b" }
         fn main() -> int  {
             let mut text = literal();
@@ -345,7 +363,7 @@ fn literal_strings_survive_returns_and_keep_explicit_nuls() {
 #[test]
 fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin", "$/shared.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin", "$/shared.resin" };
         type Caption = String;
         fn copied() -> String | Err<_> {
             let source = arc_ptr_alloc([65_ub, 0_ub, 66_ub])?;
@@ -380,7 +398,7 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
 #[test]
 fn byte_spans_print_their_length_including_nuls_and_empty_views() {
     prints(
-        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/span.resin" }; fn main() -> () | Err<_> {
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> {
             let buffer_owner = arc_ptr_alloc([65_ub, 0_ub, 66_ub, 67_ub])?; let buffer: Ref<_> = buffer_owner:get().*;
             let mut view = Span<ubyte> { data = buffer_owner:get():lea(0), length = 3_ul };
             let mut empty = Span<ubyte> { data = Ptr<ubyte>(0_ul), length = 0_ul };
@@ -423,7 +441,7 @@ fn literal_strings_have_a_distinct_type_and_require_explicit_byte_views() {
 #[test]
 fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
     prints(
-        r#"export { main }; import { "$/string.resin", "$/span.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin", "$/span.resin" };
         fn view(text: str) -> Span<ubyte>  { bytes(text) }
         fn main() -> int  {
             let mut text = "hé\0";
@@ -446,7 +464,7 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
 #[test]
 fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
     prints(
-        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/span.resin" }; fn main() -> () | Err<_> {
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> {
             let data_owner = arc_ptr_alloc([255_ub, 0_ub, 254_ub])?; let data: Ref<_> = data_owner:get().*;
             let mut buffer = Span<ubyte> { data = data_owner:get():lea(0_ul), length = 3_ul };
             let mut owned = string_from_bytes(buffer);
@@ -461,7 +479,7 @@ fn raw_byte_views_and_owned_strings_preserve_non_utf8() {
 #[test]
 fn formats_owned_temporary_results() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn text() -> String  { fmt("{0}+i{1}", (40, 85)) }
         fn main()  { print(fmt("{0}\n", (text(),))); }"#,
         b"40+i85\n",
@@ -470,7 +488,7 @@ fn formats_owned_temporary_results() {
 
 #[test]
 fn repr_renders_fields_arrays_tuples_and_active_union_payloads() {
-    prints(r#"export { main }; import { "$/string.resin" };
+    prints(r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         struct Complex { real: float64, imaginary: float64, }
         struct Problem { message: str, detail: String, }
         fn main()  {
@@ -517,7 +535,7 @@ fn repr_bytes(self: Bad) -> int  { 1 }
 #[test]
 fn free_generic_text_hooks_format_values_and_print_borrows_owned_strings() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         struct Label<T> { text: str, value: T }
         fn repr_bytes<T>(value: Ref<Label<T>>) -> (Ptr<ubyte>, ulong) {
             (value.text.data, value.text.length)
@@ -538,7 +556,7 @@ fn free_generic_text_hooks_format_values_and_print_borrows_owned_strings() {
 #[test]
 fn verifier_rejects_invalid_text_view_callbacks() {
     let mut module = module(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn main()  { print(repr(string_from_str("x"))); }"#,
     );
     let hook = *module.text_views.values().next().unwrap();
@@ -553,7 +571,7 @@ fn verifier_rejects_invalid_text_view_callbacks() {
 #[test]
 fn repr_does_not_follow_pointers() {
     prints(
-        r#"export { main }; import { "$/string.resin" };
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn main()  { print(repr(Ptr<int>(1_ul))); }"#,
         b"0x1",
     );

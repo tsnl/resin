@@ -1,6 +1,6 @@
 export { kernel, main };
 
-import { "$/span.resin", "$/string.resin", "$/gpu.resin", "$/shared.resin", "$/image.resin" };
+import { "$/span.resin", "$/string.resin", "$/stdio.resin", "$/gpu.resin", "$/shared.resin", "$/image.resin" };
 
 struct HostRoot {
 	width: uint,

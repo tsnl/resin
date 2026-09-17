@@ -1,6 +1,6 @@
 export { main };
 
-import { "$/string.resin", "$/shared.resin" };
+import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
 
 fn set(p: Ptr<int>) -> int {
 	p.* = 1;

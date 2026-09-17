@@ -9,7 +9,7 @@ fn run(source: &str) -> std::process::Output {
 #[test]
 fn generic_free_operations_support_direct_and_receiver_calls() {
     let output = run(r#"export { main };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         struct Cell<T> { value: T,
             
             
@@ -40,7 +40,7 @@ fn with<T, U>(self: Ref<Cell<T>>, value: U) -> Cell<U>  { Cell<U> { value = valu
 #[test]
 fn factory_method_arguments_follow_expected_results_and_explicit_holes() {
     let output = run(r#"export { main };
-        import { "$/string.resin" };
+        import { "$/string.resin", "$/stdio.resin" };
         struct Cell<T> { value: T, }
         struct Factory {
             

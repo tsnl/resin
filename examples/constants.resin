@@ -1,5 +1,5 @@
 export { main };
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 const (
 	read: uint = 1 << iota;

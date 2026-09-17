@@ -70,7 +70,7 @@ fn slice_lea_returns_pointers_and_evaluates_the_index_once() {
 fn source_strings_format_explicit_byte_views_and_keep_the_terminator_outside_length() {
     let output = run(
         r#"export { main };
-        import { "$/span.resin", "$/shared.resin", "$/string.resin" };
+        import { "$/span.resin", "$/shared.resin", "$/string.resin", "$/stdio.resin" };
         fn main() -> int | Err<_> {
             let buffer_owner = arc_ptr_alloc([65_ub, 0_ub, 66_ub])?; let buffer: Ref<_> = buffer_owner:get().*;
             let mut text = string_from_bytes(Span<ubyte> { data = buffer_owner:get():lea(0), length = 3_ul });
@@ -364,15 +364,20 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
 #[test]
 fn every_native_status_operation_has_a_public_result_wrapper() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let libraries = ["gpu", "window", "image", "console"];
-    let modules = libraries.map(|name| {
+    let libraries = [
+        ("gpu", "gpu"),
+        ("window", "window"),
+        ("image", "image"),
+        ("stdio", "console"),
+    ];
+    let modules = libraries.map(|(name, _)| {
         support::frontend::check_hir(
             &pipeline::load(&root.join(format!("resin/{name}.resin"))).unwrap(),
         )
         .into_module()
         .unwrap()
     });
-    for name in libraries {
+    for (_, name) in libraries {
         let header = fs::read_to_string(
             Path::new(resin_runtime::INCLUDE_DIR).join(format!("resin_runtime/{name}.h")),
         )
@@ -528,7 +533,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ref<Cleanup>)  {{ print(fmt(\"cleanup\\n\", ())); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([0_ub, 0_ub, 0_ub, 0_ub])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
+                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\", \"$/stdio.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ref<Cleanup>)  {{ print(fmt(\"cleanup\\n\", ())); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([0_ub, 0_ub, 0_ub, 0_ub])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
             ),
             "",
         );
@@ -819,7 +824,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
 fn byte_input_reports_stream_errors_instead_of_eof() {
     let output = run(
         r#"export { main };
-        import { "$/console.resin", "$/string.resin" };
+        import { "$/stdio.resin", "$/string.resin" };
         struct Cleanup {
             
         }
@@ -1158,7 +1163,7 @@ fn window_constructor_accepts_owned_titles_until_the_native_call_returns() {
                 fn window_counts() -> int;
             },
         };
-       import { "$/window.resin", "$/shared.resin", "$/string.resin" };
+       import { "$/window.resin", "$/shared.resin", "$/string.resin", "$/stdio.resin" };
         fn main() -> (int | Err<_>)  {
             let mut weak = weak_span_empty::<ubyte>();
             {

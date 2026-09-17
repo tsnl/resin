@@ -340,7 +340,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   to a span or construct a `str` from arbitrary bytes. `string_from_str(text)` copies a
   `str`, and `string_from_bytes(bytes)` copies a raw byte span. Both append a NUL outside
   their logical length. `fmt(format, arguments)` returns `String`, wrapping
-  `ArcSpan<ubyte>`; import `$/string.resin` for `String`, `fmt`, and `print`.
+  `ArcSpan<ubyte>`; import `$/string.resin` for `String`, `fmt`, and `repr`.
+  Import `$/stdio.resin` for `print`, standard-stream writes, and byte/line input.
   Formatting and reference counting are host-only. Format tuple arguments use
   `value:bytes()` for source String and span wrappers; the primitive accepts an
   explicit `(Ptr<ubyte>, ulong)` byte view and does not recognize nominal wrapper names.

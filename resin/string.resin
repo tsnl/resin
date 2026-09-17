@@ -1,13 +1,7 @@
-//! Owned strings, formatting, printing, and value representations.
+//! Owned strings, formatting, and value representations.
 //! These operations run on the host.
 
-export { String, fmt, print, repr, string_from_str, string_from_bytes, get, repr_bytes, bytes, clone };
-
-extern {
-	"resin_runtime/print.h": {
-		fn resin_print(data: Ptr<ubyte>, length: ulong);
-	},
-};
+export { String, fmt, repr, string_from_str, string_from_bytes, get, repr_bytes, bytes, clone };
 
 import { "span.resin", "shared.resin" };
 
@@ -48,19 +42,6 @@ fn fmt<A>(format: Ref<Span<ubyte>>, arguments: A) -> String {
 
 fn fmt<A>(format: Ref<String>, arguments: A) -> String {
 	fmt(format:get(), arguments)
-}
-
-// Writes bytes verbatim, flushes, and adds no newline.
-fn print(text: str) {
-	resin_print(text.data, text.length)
-}
-
-fn print(text: Ref<Span<ubyte>>) {
-	resin_print(text.data, text.length)
-}
-
-fn print(text: Ref<String>) {
-	print(text:get())
 }
 
 intrinsic "string_from_bytes" fn string_from_bytes(data: Ptr<ubyte>, length: ulong) -> StrongOwner;

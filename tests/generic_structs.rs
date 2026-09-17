@@ -8,7 +8,8 @@ fn run(source: &str) -> std::process::Output {
 
 #[test]
 fn constructors_and_nominal_arguments_infer_function_parameters() {
-    let output = run(r#"export { main }; import { "$/string.resin" };
+    let output = run(
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         struct Pair<T> { first: T, second: T, }
         fn sum<T>(pair: Pair<T>) -> T  { pair.first + pair.second }
         fn make<T>(first: T, second: T) -> Pair<T>  {
@@ -20,7 +21,8 @@ fn constructors_and_nominal_arguments_infer_function_parameters() {
             print(fmt("{0} {1}", (sum(small), sum(large))));
             0
         }
-    "#);
+    "#,
+    );
     assert!(
         output.status.success(),
         "{}",
@@ -265,7 +267,8 @@ fn generic_constructor_literals_are_range_checked_after_substitution() {
 
 #[test]
 fn local_structs_capture_outer_types_and_specialize_each_layout() {
-    let output = run(r#"export { main }; import { "$/string.resin" };
+    let output = run(
+        r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
         fn pair<T>(value: T) -> _  {
             struct Local<U> { outer: T, inner: U, }
             Local<int> { outer = value, inner = 35 }
@@ -280,7 +283,8 @@ fn local_structs_capture_outer_types_and_specialize_each_layout() {
             )));
             0
         }
-    "#);
+    "#,
+    );
     assert!(
         output.status.success(),
         "{}",
