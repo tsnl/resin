@@ -35,7 +35,7 @@ unannotated locals and plain `_` holes infer value types.
 ```resin
 let mut value: i32 = 1;
 let reference: Ref<_> = value;
-let copied = reference; // int copies; copied remains 1.
+let copied = reference; // i32 copies; copied remains 1.
 reference = 2;          // Writes value through the alias.
 ```
 

@@ -37,7 +37,12 @@ fn image_checkpoints_write_opaque_pngs_without_a_gpu() {
     let image = resin_runtime::image_read_png(directory.path().join("mandelbrot.png"), 4).unwrap();
     assert_eq!((image.width, image.height), (320, 240));
     assert!(image.pixels.chunks_exact(4).all(|pixel| pixel[3] == 255));
-    assert!(image.pixels.chunks_exact(4).any(|pixel| pixel[..3] != [0, 0, 0]));
+    assert!(
+        image
+            .pixels
+            .chunks_exact(4)
+            .any(|pixel| pixel[..3] != [0, 0, 0])
+    );
 }
 
 #[test]

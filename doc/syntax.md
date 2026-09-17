@@ -101,7 +101,7 @@ const (
 	_ = iota; // Skip index 2.
 	execute: u32 = 1 << iota; // 8
 );
-const reset = iota; // 0, with type long.
+const reset = iota; // 0, with type i64.
 ```
 
 `iota` starts at zero in each `const` declaration and increments once per specification,

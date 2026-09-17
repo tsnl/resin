@@ -39,8 +39,8 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () {
 	let args = arguments(argc, argv);
 	let mut index: u64 = 1;
 	while (index < args.length) {
-		let argument = argument(args, index);
-		let text = fmt("{0}\n", (argument:bytes(),));
+		let item = argument(args, index);
+		let text = fmt("{0}\n", (item:bytes(),));
 		print(text);
 		index = index + u64(1);
 	};

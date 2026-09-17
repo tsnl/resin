@@ -9,7 +9,7 @@ need an explicit `$/span.resin` import.
 
 ```resin
 let gpu = gpu_new()?;
-let scalar = gpu:create(42)?;                  // GpuPtr<long>, inferred from the value
+let scalar = gpu:create(42)?;                  // GpuPtr<i64>, inferred from the value
 let values = gpu:alloc::<f32>(1024)?;
 let mut index: u64 = 0;
 while (index < values.length) {

@@ -40,7 +40,7 @@ Ordinary helpers can run on the CPU or be called from shaders, within the
 
 ```resin
 export { main };
-import { "$/string.resin" };
+import { "$/string.resin", "$/stdio.resin" };
 
 struct Point { x: f32, y: f32, }
 
@@ -53,7 +53,8 @@ fn squared_distance(a: Point, b: Point) -> f32  {
 fn main()  {
 	let mut a = Point { x = 0, y = 0 };
 	let mut b = Point { x = 3, y = 4 };
-	print(fmt("distance squared = {0}\n", (squared_distance(a, b),)));
+	let text = fmt("distance squared = {0}\n", (squared_distance(a, b),));
+	print(text);
 }
 ```
 

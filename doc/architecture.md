@@ -384,7 +384,7 @@ use std::{collections::BTreeMap, sync::Arc};
 async fn main() -> (() | Err<Box<dyn std::error::Error + Send + Sync>>) {
     let execution = Execution::default();
     let cancellation = Cancellation::new();
-    let source = Source::new("example.resin", "export { main }; fn main() -> int { 42 }");
+    let source = Source::new("example.resin", "export { main }; fn main() -> i32 { 42 }");
     let syntax = Arc::new(resin_cst::build_cst(
         source.text().to_owned(), None, &execution, &cancellation,
     ).await?);
