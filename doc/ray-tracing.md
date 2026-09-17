@@ -1,4 +1,4 @@
-# Ray tracing pipelines
+# Ray tracing with a fisheye camera
 
 Import `$/gpu.resin` to build triangle scenes and trace them with Vulkan ray
 tracing pipelines. See the complete

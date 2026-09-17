@@ -6,9 +6,11 @@ explain workflows involving several modules:
 - [Strings and console I/O](strings.md): literals, owned strings, formatting, and streams.
 - [PNG images](images.md): image ownership, channels, row strides, and pixel buffers.
 - [Shaders and graphics](shaders.md): entry points, pipelines, and device requirements.
-- [Ray tracing pipelines](ray-tracing.md): a primary-ray fisheye renderer, triangle scenes, and typed payloads.
 - [GPU buffers](gpu-buffers.md): ownership, access, uploads, and readback.
 - [Windows and presentation](windowing.md): event handling, input, resize, and images.
+
+For complete rendering projects, see the [tutorials](tutorials.md), including
+the Mandelbrot explorer and a ray tracing pipeline with a fisheye camera.
 
 Library operations are exported free functions, usable with colon syntax. Fallible
 operations return ordinary error unions; resource owners clean up on scope exit.
