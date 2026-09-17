@@ -270,7 +270,14 @@ fn numbered_examples_compile_as_strict_c11() {
                 .starts_with("eg")
         {
             let module = pipeline::file_module(&path).unwrap();
-            let output = run_module(&module);
+            let project = support::project::Project::new(&module, Some("main")).unwrap();
+            // GPU execution is covered by ray_tracing.rs; this test also runs
+            // on hosts with no Vulkan device or loader.
+            if path.ends_with("eg013_ray_tracing.resin") {
+                project.build_executable();
+                continue;
+            }
+            let output = project.run();
             assert_eq!(
                 output.status.code(),
                 Some(0),
