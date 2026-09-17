@@ -119,12 +119,15 @@ impl Completion<'_> {
     fn consume(&mut self, mut term: Term, target: crate::Type) -> Result<Term> {
         self.require_available(&term)?;
         let value_type = match &term.ty {
-            crate::Type::Reference { referent } => referent.as_ref(),
+            crate::Type::Reference { referent, .. } => referent.as_ref(),
             ty => ty,
         }
         .clone();
-        if matches!(target, crate::Type::Reference { .. }) {
+        if let crate::Type::Reference { mutable, .. } = target {
             require_reference_place(&term)?;
+            if mutable {
+                require_mutable_place(&term)?;
+            }
         } else if !value_type.copies_implicitly() && reference_place(&term) {
             let span = term.span;
             let ty = term.ty.clone();
@@ -453,6 +456,7 @@ impl Completion<'_> {
         Ok(TermKind::Local {
             binding: declaration,
             name: name.clone(),
+            mutable: self.mutable.get(&declaration).copied().unwrap_or(false),
         })
     }
 
@@ -486,7 +490,7 @@ impl Completion<'_> {
             kind,
         };
         Ok(Box::new(
-            if let crate::Type::Reference { referent } = &place.ty {
+            if let crate::Type::Reference { referent, .. } = &place.ty {
                 Term {
                     span: source.span,
                     ty: *referent.clone(),
@@ -503,6 +507,15 @@ impl Completion<'_> {
     fn assign(&mut self, place: &typed::Term, value: &typed::Term) -> Result<TermKind> {
         let place = self.place(place)?;
         let destination = owned_path(&place);
+        if destination.is_none() {
+            if !reference_place(&place) {
+                return Err(GenerateError {
+                    span: place.span,
+                    kind: GenerateErrorKind::NotAPlace,
+                });
+            }
+            require_mutable_place(&place)?;
+        }
         if let Some((binding, path)) = &destination {
             if !self.mutable.get(binding).copied().unwrap_or(false)
                 && (self.written.contains(binding) || !path.is_empty())
@@ -782,7 +795,7 @@ impl Completion<'_> {
             .map(|receiver| {
                 if matches!(
                     self.solver.head(&params[0]),
-                    Type::Node(super::infer::Head::Reference, _)
+                    Type::Node(super::infer::Head::Reference { .. }, _)
                 ) {
                     self.argument(receiver, &params[0]).map(Box::new)
                 } else {
@@ -951,6 +964,7 @@ impl Completion<'_> {
         let receiver = match &function_type {
             crate::Type::Array { .. } => Some((
                 crate::Type::Reference {
+                    mutable: false,
                     referent: Box::new(function_type.clone()),
                 },
                 ReceiverConversion::Borrow,
@@ -1044,7 +1058,7 @@ impl Completion<'_> {
                 self.written.remove(binding);
                 if matches!(
                     self.solver.head(&ty.ty),
-                    Type::Node(super::infer::Head::Reference, _)
+                    Type::Node(super::infer::Head::Reference { .. }, _)
                 ) {
                     return Err(GenerateError::inference(
                         name.span,
@@ -1279,6 +1293,55 @@ fn require_reference_place(term: &Term) -> Result<()> {
     }
 }
 
+fn require_mutable_place(term: &Term) -> Result<()> {
+    if mutable_place(term) {
+        Ok(())
+    } else {
+        Err(GenerateError::inference(
+            term.span,
+            "writable access requires RefMut or a mutable place; declare local storage with `let mut`",
+        ))
+    }
+}
+
+fn mutable_place(term: &Term) -> bool {
+    if let crate::Type::Reference { mutable, .. } = &term.ty {
+        return *mutable;
+    }
+    if matches!(
+        term.ty,
+        crate::Type::Parameter { .. }
+            | crate::Type::Member { .. }
+            | crate::Type::Operation { .. }
+            | crate::Type::Method { .. }
+            | crate::Type::FunctionParameter { .. }
+            | crate::Type::FunctionResult { .. }
+            | crate::Type::Value { .. }
+    ) {
+        return true;
+    }
+    match &term.kind {
+        TermKind::Local { mutable, .. } => *mutable,
+        TermKind::Use { arg } => mutable_place(arg),
+        TermKind::Deref { pointer } => mutable_access(&pointer.ty).unwrap_or(false),
+        TermKind::Field { base, .. } => {
+            mutable_access(&base.ty).unwrap_or_else(|| mutable_place(base))
+        }
+        _ => false,
+    }
+}
+
+// Loading a pointer field starts access under that pointer's own contract.
+fn mutable_access(ty: &crate::Type) -> Option<bool> {
+    match ty {
+        crate::Type::Pointer { pointee } => Some(mutable_access(pointee).unwrap_or(true)),
+        crate::Type::Reference { referent, mutable } => {
+            Some(mutable_access(referent).unwrap_or(*mutable))
+        }
+        _ => None,
+    }
+}
+
 // A reference value already carries a location. Reading its referent preserves
 // a place until storage lowering reaches an actual value consumer.
 fn reference_place(term: &Term) -> bool {
@@ -1336,7 +1399,7 @@ fn reference_borrow(term: &Term) -> bool {
         TermKind::Use { arg } => reference_borrow(arg),
         TermKind::Field { base, .. } => {
             let ty = match &base.ty {
-                crate::Type::Reference { referent } => referent.as_ref(),
+                crate::Type::Reference { referent, .. } => referent.as_ref(),
                 ty => ty,
             };
             known_value_receiver(ty) && reference_borrow(base)
@@ -1427,6 +1490,7 @@ mod tests {
         assert_eq!(
             completed.body.ty,
             crate::Type::Reference {
+                mutable: false,
                 referent: Box::new(crate::Type::UInt8)
             }
         );

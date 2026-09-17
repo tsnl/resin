@@ -15,7 +15,7 @@ import { "$/status.resin", "$/shared.resin" };
 
 extern type ResinGpu;
 struct GpuOwner { handle: Ptr<ResinGpu> }
-fn drop(owner: Ref<GpuOwner>) {
+fn drop(owner: RefMut<GpuOwner>) {
 	if (u64(owner.handle) != u64(0)) {
 		resin_gpu_destroy(owner.handle);
 	};
@@ -67,7 +67,7 @@ other integer values need an explicit conversion, such as `:at(u64(i))`:
 
 ```resin
 let values = arc_ptr_alloc([i32(10), 20, 30])?;
-values:get():at(1) = 42;
+values:get():at_mut(1) = 42;
 let view = Span<i32> { data = values:get():lea(0), length = u64(3) };
 let element = view:at(1);
 let text = fmt("{0}\n", (element,));

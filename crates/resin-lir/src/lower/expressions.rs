@@ -17,7 +17,7 @@ impl FunctionLowering<'_> {
             TermKind::Function { function } => self.emit(Instr::Function {
                 function: *function,
             }),
-            TermKind::Local { binding, name } => return self.gen_var(*binding, name),
+            TermKind::Local { binding, name, .. } => return self.gen_var(*binding, name),
             TermKind::Unwrap { value } => {
                 self.gen_term(value, None)?;
                 self.emit(Instr::ExcludeNone);
@@ -101,7 +101,7 @@ impl FunctionLowering<'_> {
             }
             TermKind::Assign { place, value } => return self.gen_assign(place, value),
             TermKind::Address { place } => return self.gen_address(place),
-            TermKind::Borrow { place } => return self.gen_borrow(place),
+            TermKind::Borrow { place } => return self.gen_borrow(place, expected),
             TermKind::Deref { pointer } => {
                 self.gen_term(pointer, None)?;
                 self.emit(Instr::Load);
@@ -204,6 +204,9 @@ impl FunctionLowering<'_> {
                     && !matches!(args.params[0], Ty::Reference { .. })
                 {
                     self.emit(Instr::Borrow);
+                    if matches!(result, Ty::Reference { mutable: false, .. }) {
+                        self.emit(Instr::ReadOnly);
+                    }
                 }
             }
             Intrinsic::GpuArgumentsDispatch => self.emit(Instr::GpuArgumentsDispatch),

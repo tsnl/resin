@@ -295,7 +295,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   body errors never provide overload fallback. Source-known calls become ordinary HIR calls;
   dependent calls retain lexical candidate IDs for specialization before storage lowering.
   Compiler-provided operations use the same argument checking and editor analysis path.
-  HIR registers free `drop(Ref<T>)` and `repr_bytes(Ref<T>)` hooks with their owning
+  HIR registers free `drop(RefMut<T>)` and `repr_bytes(Ref<T>)` hooks with their owning
   nominal declaration; direct calls remain ordinary calls.
 - Libraries declare low-level compiler operations with `intrinsic "operation" fn name<T>(...) -> Type;`.
   Validate each signature against an explicit primitive contract during HIR construction.
@@ -307,7 +307,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   partial moves, immutable assignment, branch joins, and loop exits/backedges, including
   unused definitions. Moving an immutable owner is allowed. Completed HIR makes moves
   explicit; LIR specializes borrowed reads and emits transfer/cleanup operations.
-  References and raw pointers retain unchecked lifetimes and mutable aliasing; there is
+  References and raw pointers retain unchecked lifetimes and aliasing. `Ref` is read-only,
+  while `RefMut` permits writes without exclusivity; there is
   no borrow checker. `pointer:replace(replacement)` transfers a referent while leaving
   initialized storage. Shared owners require explicit visible `clone` operations.
   `ICopy`/`IClone`, traits, effects, and general function CTFE remain deferred.
@@ -396,23 +397,28 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 - Arrays, `Span<T>`, and `str` provide indexing with `items:at(index)`, returning `Ref<T>`
   (`Ref<u8>` for `str`);
   its index parameter is `u64`, with explicit conversions for other integer types.
-  Use `items:at(index)` to read or write. Pointers to arrays, spans, and `str`
+  Use `items:at(index)` to read and `items:at_mut(index)` to obtain `RefMut<T>`
+  for writes to writable array places or spans. String literals have no `at_mut`.
+  Pointers to arrays, spans, and `str`
   also support `items:lea(index)` returning an element pointer. Local array values
   and references to arrays have no `lea` operation.
   Arrays retain the earlier `items(index)` spelling;
   source spans use `:at(index)`.
   Bounds checking is not part of the indexing contract. Host indexing diagnoses invalid indices;
   shader indexing is unchecked, and callers must stay within valid storage.
-  Places remain a compiler expression category. Source `Ref<T>` bindings and function
-  results expose a fixed, nonowning alias to initialized storage. Unannotated locals and
+  Places remain a compiler expression category. `Ref<T>` exposes read-only access;
+  `RefMut<T>` exposes writable access. Both are fixed, nonowning aliases to initialized
+  storage. A writable borrow of a local or inline field requires `mut` on its binding. Unannotated locals and
   plain result holes infer value types; `let alias: Ref<T> = place;` retains the alias.
-  Assignment writes its referent even through an immutable reference binding.
-  Locals, their inline fields, and `Ref` referents cannot have their addresses taken.
+  Assignment through `RefMut` writes its referent even through an immutable reference
+  binding. `RefMut` can weaken to `Ref`, never the reverse; permissions survive generic
+  specialization and projections. Reading a pointer field starts that pointer's own access.
+  Locals, their inline fields, and both reference kinds cannot have their addresses taken.
   A pointer dereference and its field projections remain addressable. Parameters and
   results retain their Ref/Ptr contract through generic specialization. Ref parameters require initialized places: locals, fields, pointer dereferences,
   or reference-valued results. Bind temporary values to explicit locals before borrowing. HIR retains reference use;
   specialization preserves distinct concrete Ref/Ptr types. LIR LocalRef and Borrow
-  produce references, never pointers. Verification rejects reference-to-pointer
+  produce writable references, never pointers; ReadOnly weakens them. Verification rejects reference-to-pointer
   conversions; only final target lowering chooses an address representation.
   Reject direct reference aggregate payloads, nested references, and reference-valued
   generic arguments. Shader-local references can cross helper calls using Function

@@ -246,8 +246,9 @@ pub enum Ty {
     Pointer {
         pointee: Box<Ty>,
     },
-    /// A borrowed place. Never convertible to a pointer, even when its storage is addressable.
+    /// A borrowed place: `Ref` when read-only, `RefMut` when mutable. Neither grants a pointer.
     Reference {
+        mutable: bool,
         referent: Box<Ty>,
     },
     /// Opaque allocation ownership, checked byte offset, and host access permissions.
@@ -309,7 +310,10 @@ impl Ty {
     /// The value accessed through a pointer or reference. This query grants no pointer capability.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
-            Self::Pointer { pointee } | Self::Reference { referent: pointee } => Some(pointee),
+            Self::Pointer { pointee }
+            | Self::Reference {
+                referent: pointee, ..
+            } => Some(pointee),
             _ => None,
         }
     }

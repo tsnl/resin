@@ -40,8 +40,8 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         struct Data { marker: u32, wide: u64, amount: f32, }
         struct Payload { tag: u32, data: Data, end: u32, }
         struct Params { count: u32, values: Ptr<Payload>, tail: f32, }
-        fn at (values: Ptr<Payload>, index: u32) -> Ref<Payload>  { device_index(values, u64(67), u64(index)).* }
-        fn bump (p: Ref<Payload>, index: u32) -> ()  {
+        fn at (values: Ptr<Payload>, index: u32) -> RefMut<Payload>  { device_index(values, u64(67), u64(index)).* }
+        fn bump (p: RefMut<Payload>, index: u32) -> ()  {
             let old: Ref<Payload> = p;
             p = Payload {
                 tag = old.tag + u32(1),
@@ -51,7 +51,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         }
         @compute_shader fn kernel (invocation: u64, root: Ptr<Params>) -> ()  { let mut index = u32(invocation);
             if (index < root.count) {
-                let mut p: Ref<Payload> = at(root.values, index);
+                let p: RefMut<Payload> = at(root.values, index);
                 bump(p, index)
             } else { () }
         }
@@ -541,7 +541,7 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
 struct Root { count: u32, pixels: Ptr<u32>, }
         fn read(i: u32) -> u32  {
             let mut values = [u32(10), u32(20)];
-            let previous = values:at(u64(0)); values:at(u64(0)) = i;
+            let previous = values:at(u64(0)); values:at_mut(u64(0)) = i;
             values:at(u64(i & u32(1))) + values:at(u64(i & u32(1))) + previous - u32(10)
         }
         @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut i = u32(invocation);
@@ -905,7 +905,7 @@ fn packed_byte_arrays_execute_in_shaders() {
                 let mut rows = [[u8(65), u8(66)], [u8(0), u8(255)]];
                 let mut row = rows:at(index & u64(1));
                 let mut copy = row;
-                row:at(u64(0)) = u8(99);
+                row:at_mut(u64(0)) = u8(99);
                 let mut packed = u32(copy:at(u64(0))) + u32(copy:at(u64(1))) * u32(256);
                 let mut output = Span<u32> { data = root.pixels, length = u64(root.count) };
                 device_index(output.data, output.length, index).* = packed + u32(size_of(rows)) * u32(65536);

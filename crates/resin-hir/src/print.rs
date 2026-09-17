@@ -180,9 +180,9 @@ impl Printer {
             TermKind::Layout { of, size } => {
                 list(if *size { "sizeof" } else { "alignof" }, vec![self.ty(of)])
             }
-            TermKind::Local { binding: id, name } => {
-                list("local", vec![binding(*id), atom(&name.val)])
-            }
+            TermKind::Local {
+                binding: id, name, ..
+            } => list("local", vec![binding(*id), atom(&name.val)]),
             TermKind::Function {
                 function,
                 type_args,
@@ -451,7 +451,11 @@ impl TypeNames {
                     )
                 }
             }
-            Type::Reference { referent } => format!("Ref<{}>", self.format(referent)),
+            Type::Reference { referent, mutable } => format!(
+                "{}<{}>",
+                if *mutable { "RefMut" } else { "Ref" },
+                self.format(referent)
+            ),
             Type::Value { of } => format!("Value<{}>", self.format(of)),
             Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
             Type::GpuView => "GpuView".into(),

@@ -427,7 +427,7 @@ fn transfer(types: &Types<'_>, target: usize, stack: &[Slot]) -> String {
 }
 
 fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {
-    matches!(ty, Ty::Pointer { pointee } | Ty::Reference { referent: pointee } if pointee.needs_drop(&types.module.types))
+    matches!(ty, Ty::Pointer { pointee } | Ty::Reference { referent: pointee, .. } if pointee.needs_drop(&types.module.types))
 }
 
 fn instruction(
@@ -550,8 +550,10 @@ fn instruction(
             widen(types, &args[0].ty, result.unwrap(), &args[0].expr)
         }
         Instr::IsVariant { tag } => {
-            let (ty, expr) = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } =
-                &args[0].ty
+            let (ty, expr) = if let Ty::Pointer { pointee }
+            | Ty::Reference {
+                referent: pointee, ..
+            } = &args[0].ty
             {
                 (pointee.as_ref(), format!("*({})", args[0].expr))
             } else {
@@ -600,7 +602,7 @@ fn instruction(
         }
         Instr::PointerCast { ty } => format!("({})(uintptr_t)({})", types.name(ty), args[0].expr),
         Instr::Push { value } => literal(types, result.unwrap(), value),
-        Instr::Borrow => args[0].expr.clone(),
+        Instr::Borrow | Instr::ReadOnly => args[0].expr.clone(),
         Instr::LocalRef { local } => format!("&r_l{}", local.index()),
         Instr::Load | Instr::TransferLoad => {
             format!("*({})", types.unwrap(&args[0].ty, args[0].expr.clone()))
@@ -798,7 +800,11 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
 fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Result<String, Error> {
     let mut ty = types.shape(&source.ty);
     let mut expr = types.unwrap(&source.ty, source.expr.clone());
-    let pointer = if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = ty {
+    let pointer = if let Ty::Pointer { pointee }
+    | Ty::Reference {
+        referent: pointee, ..
+    } = ty
+    {
         expr = types.unwrap(pointee, format!("*({expr})"));
         ty = types.shape(pointee);
         true

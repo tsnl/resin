@@ -137,7 +137,7 @@ fn omitted_unit_returns_run_and_reject_non_unit_tails() {
 #[test]
 fn destruction_runs_when_native_status_propagates_to_the_entry() {
     let output = cli(
-        "export { main }; import { \"$/string.resin\", \"$/stdio.resin\", \"$/status.resin\" }; struct Cleanup {  }\nfn drop(self: Ref<Cleanup>)  { { let borrowed = fmt(\"cleanup\\n\", ()); print(borrowed) }; }\n  fn main() -> (() | Err<_>)  { runtime_status_from_code(0)?; let mut cleanup = Cleanup {}; runtime_status_from_code(8)?; (()) }",
+        "export { main }; import { \"$/string.resin\", \"$/stdio.resin\", \"$/status.resin\" }; struct Cleanup {  }\nfn drop(self: RefMut<Cleanup>)  { { let borrowed = fmt(\"cleanup\\n\", ()); print(borrowed) }; }\n  fn main() -> (() | Err<_>)  { runtime_status_from_code(0)?; let mut cleanup = Cleanup {}; runtime_status_from_code(8)?; (()) }",
         &[],
     );
     assert_eq!(output.status.code(), Some(1));

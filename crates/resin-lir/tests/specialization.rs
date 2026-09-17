@@ -203,6 +203,7 @@ fn identity_signatures_and_bodies_are_concrete_without_changing_hir() {
         term(
             ty.clone(),
             TermKind::Local {
+                mutable: true,
                 binding: 0,
                 name: name.clone(),
             },
@@ -247,6 +248,7 @@ fn unused_families_do_not_constrain_supported_concrete_operations() {
     let value = term(
         ty.clone(),
         TermKind::Local {
+            mutable: true,
             binding: 0,
             name: name.clone(),
         },
@@ -315,6 +317,7 @@ fn implicit_drop_references_use_concrete_function_identities() {
             span: SPAN,
         },
         annotation: annotation(Type::Reference {
+            mutable: true,
             referent: Box::new(Type::Defined {
                 arguments: vec![],
                 definition: TypeId::from_index(0),
@@ -758,6 +761,7 @@ fn nominal_hooks_receive_owner_arguments_before_storage_lowering() {
         name: Ident::new("self".into(), SPAN),
         binding: Some(0),
         annotation: annotation(Type::Reference {
+            mutable: true,
             referent: Box::new(nominal(Type::Parameter { parameter: U })),
         }),
     });
@@ -771,6 +775,7 @@ fn nominal_hooks_receive_owner_arguments_before_storage_lowering() {
         assert_eq!(
             lir.functions[hook.index()].locals[0].ty,
             Ty::Reference {
+                mutable: true,
                 referent: Box::new(Ty::Defined {
                     definition: TypeId::from_index(index)
                 })
@@ -1013,6 +1018,7 @@ fn member_types_and_field_indices_are_determined_from_concrete_receivers() {
                 base: Box::new(term(
                     pointer.clone(),
                     TermKind::Local {
+                        mutable: true,
                         binding: 0,
                         name: name.clone(),
                     },
@@ -1071,6 +1077,7 @@ fn conversions_select_the_concrete_operation_after_substitution() {
                 arg: Box::new(term(
                     Type::UInt64,
                     TermKind::Local {
+                        mutable: true,
                         binding: 0,
                         name: name.clone(),
                     },
@@ -1141,6 +1148,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
                 arg: Box::new(term(
                     t.clone(),
                     TermKind::Local {
+                        mutable: true,
                         binding: 0,
                         name: name.clone(),
                     },

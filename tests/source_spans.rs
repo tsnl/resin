@@ -70,7 +70,7 @@ fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows(
             let values_owner = arc_ptr_alloc([u64(3), u64(7), u64(11)])?; let values: Ref<_> = values_owner:get().*;
             let mut view = Span<u64> { data = values_owner:get():lea(0), length = u64(3) };
             let mut alias = view:slice(1, 2);
-            alias:at(0) = u64(42);
+            alias:at_mut(0) = u64(42);
             let mut raw = alias:as_bytes();
             let mut literal = bytes("A\0B");
             if (values:at(1) == u64(42) && raw.length == u64(16)
@@ -192,7 +192,7 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
         import { "$/span.resin" };
         struct Root { values: Span<u32>, }
         @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
-            root.values:at(index) = u32(42);
+            root.values:at_mut(index) = u32(42);
         }
     "#,
         "kernel",
@@ -233,12 +233,12 @@ fn reference_returning_index_wrappers_preserve_nested_places() {
     import { "$/shared.resin", "$/span.resin" };
     struct Payload { value: i32, }
     struct Entry { nested: Payload, }
-    fn entry_at(items: Ref<Span<Entry>>, index: u64) -> Ref<Entry>  { items:at(index) }
+    fn entry_at(items: Ref<Span<Entry>>, index: u64) -> RefMut<Entry>  { items:at_mut(index) }
     fn main() -> i32 | Err<_> {
         let items_owner = arc_ptr_alloc([Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }])?; let items: Ref<_> = items_owner:get().*;
         let mut span = Span<Entry> { data = Ptr<Entry>(items_owner:get()), length = u64(2) };
         entry_at(span, u64(1)).nested.value = 42;
-        let p: Ref<i32> = entry_at(span, u64(1)).nested.value;
+        let p: RefMut<i32> = entry_at(span, u64(1)).nested.value;
         p = p + 1;
         let mut copied = Payload { value = entry_at(span, u64(1)).nested.value };
         copied.value = 99;

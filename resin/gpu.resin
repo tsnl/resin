@@ -133,7 +133,7 @@ struct GpuOwner {
 	handle: Ptr<ResinGpu>,
 	window: Window | None,
 }
-fn drop(self: Ref<GpuOwner>) {
+fn drop(self: RefMut<GpuOwner>) {
 	if (u64(self.handle) != u64(0)) {
 		resin_gpu_destroy(self.handle);
 	};
@@ -244,7 +244,7 @@ struct ImageOwner {
 	handle: Ptr<ResinImage>,
 	gpu: Gpu,
 }
-fn drop(self: Ref<ImageOwner>) {
+fn drop(self: RefMut<ImageOwner>) {
 	if (u64(self.handle) != u64(0)) {
 		resin_gpu_free_image(self.gpu:native(), self.handle);
 	};
@@ -269,7 +269,7 @@ struct PipelineOwner {
 	handle: Ptr<ResinPipeline>,
 	gpu: Gpu,
 }
-fn drop(self: Ref<PipelineOwner>) {
+fn drop(self: RefMut<PipelineOwner>) {
 	if (u64(self.handle) != u64(0)) {
 		resin_gpu_free_pipeline(self.gpu:native(), self.handle);
 	};
@@ -299,7 +299,7 @@ struct CommandsOwner {
 	gpu: Gpu,
 	retained: ArcPtr<RecordedResources> | None,
 }
-fn drop(self: Ref<CommandsOwner>) {
+fn drop(self: RefMut<CommandsOwner>) {
 	if (u64(self.handle) != u64(0)) {
 		resin_gpu_cancel_command_buffer(self.gpu:native(), self.handle);
 	};

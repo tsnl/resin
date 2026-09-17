@@ -298,7 +298,7 @@ fn device_pointers_and_shared_roots_compile() {
             Stage::Compute,
         ),
         (
-            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: u64, values: Ptr<u32>, } @compute_shader fn kernel (invocation: u64, root: Ptr<Data>) -> ()  { let mut i = u32(invocation); let mut p = root.values; let mut q: Ref<u32> = device_index(p, u64(64), u64(i)).*; q = u32(3); root.wide = u64(4294967297); }",
+            "export { kernel }; import { \"$/span.resin\" }; struct Data { wide: u64, values: Ptr<u32>, } @compute_shader fn kernel (invocation: u64, root: Ptr<Data>) -> ()  { let mut i = u32(invocation); let mut p = root.values; let mut q: RefMut<u32> = device_index(p, u64(64), u64(i)).*; q = u32(3); root.wide = u64(4294967297); }",
             Stage::Compute,
         ),
         (
@@ -530,7 +530,7 @@ fn literal_strings_report_the_missing_shader_storage_support() {
 #[test]
 fn compute_index_uses_wide_arithmetic_and_indexes_spans_directly() {
     let m = module(
-        "export { kernel }; import { \"$/span.resin\" }; @compute_shader fn kernel(index: u64, output: Ptr<Span<u64>>)  { if (index < output.length) { output.*:at(index) = index; }; }",
+        "export { kernel }; import { \"$/span.resin\" }; @compute_shader fn kernel(index: u64, output: Ptr<Span<u64>>)  { if (index < output.length) { output.*:at_mut(index) = index; }; }",
     );
     let project = support::project::Project::new(&m, None).unwrap();
     let source = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
@@ -636,12 +636,12 @@ fn local_reference_specialization_bounds_nested_emission() {
     let mut source = String::from("export { kernel }; ");
     for index in 0..130 {
         source.push_str(&format!(
-            "fn helper_{index}(value: Ref<u32>) {{ helper_{}(value); }} ",
+            "fn helper_{index}(value: RefMut<u32>) {{ helper_{}(value); }} ",
             index + 1
         ));
     }
-    source.push_str("fn helper_130(value: Ref<u32>) { value = u32(42); } ");
-    source.push_str("@compute_shader fn kernel(index: u64, output: Ptr<u32>) { let value: u32 = 0; helper_0(value); output.* = value; }");
+    source.push_str("fn helper_130(value: RefMut<u32>) { value = u32(42); } ");
+    source.push_str("@compute_shader fn kernel(index: u64, output: Ptr<u32>) { let mut value: u32 = 0; helper_0(value); output.* = value; }");
     let error = pipeline::shader_error(&source);
     assert!(
         error

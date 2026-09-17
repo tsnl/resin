@@ -22,7 +22,7 @@ struct Counter {
 /// Increase the count by one.
 ///
 /// Borrows access without granting the caller a pointer.
-fn increment(counter: Ref<Counter>) {
+fn increment(counter: RefMut<Counter>) {
     counter.value = counter.value + 1;
 }
 ```

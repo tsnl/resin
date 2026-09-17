@@ -307,8 +307,8 @@ fn intrinsic_declarations_format_without_semantic_lookup() {
 #[test]
 fn reference_types_and_initialized_binding_annotations() {
     check(
-        "fn identity<T>(value:Ref<T>)->Ref<T>{value}fn main(){let mut value:i32=1;let mut alias:Ref<_>=identity(value);alias=2;}",
-        "fn identity<T>(value: Ref<T>) -> Ref<T> {\n\tvalue\n}\nfn main() {\n\tlet mut value: i32 = 1;\n\tlet mut alias: Ref<_> = identity(value);\n\talias = 2;\n}\n",
+        "fn identity<T>(value:RefMut<T>)->RefMut<T>{value}fn main(){let mut value:i32=1;let mut alias:RefMut<_>=identity(value);alias=2;}",
+        "fn identity<T>(value: RefMut<T>) -> RefMut<T> {\n\tvalue\n}\nfn main() {\n\tlet mut value: i32 = 1;\n\tlet mut alias: RefMut<_> = identity(value);\n\talias = 2;\n}\n",
     );
 }
 

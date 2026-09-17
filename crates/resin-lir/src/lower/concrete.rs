@@ -52,6 +52,8 @@ pub(super) enum TermKind {
     Local {
         binding: BindingId,
         name: Ident,
+        /// Whether the source binding permits a writable borrow.
+        mutable: bool,
     },
     Function {
         function: FunctionId,
@@ -186,6 +188,7 @@ pub(super) enum Statement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReceiverConversion {
     Value,
+    ReadOnly,
     Borrow,
     Load,
 }

@@ -62,7 +62,7 @@ struct Params { values: Span<f32>, scale: f32 }
 @compute_shader
 fn kernel(index: u64, root: Ptr<Params>) -> ()  {
     if (index < root.values.length) {
-        let mut p: Ref<f32> = root.values:at(index);
+        let mut p: RefMut<f32> = root.values:at_mut(index);
         p = p * root.scale;
         ()
     } else { () }

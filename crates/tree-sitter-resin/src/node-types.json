@@ -1763,6 +1763,10 @@
             "named": false
           },
           {
+            "type": "RefMut",
+            "named": false
+          },
+          {
             "type": "uid",
             "named": true
           }
@@ -1995,6 +1999,10 @@
   },
   {
     "type": "Ref",
+    "named": false
+  },
+  {
+    "type": "RefMut",
     "named": false
   },
   {

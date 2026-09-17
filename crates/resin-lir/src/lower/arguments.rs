@@ -17,7 +17,11 @@ impl FunctionLowering<'_> {
                 self.gen_term(receiver, Some(to))?;
             }
             ReceiverConversion::Borrow => {
-                self.gen_borrow(receiver)?;
+                self.gen_borrow(receiver, to)?;
+            }
+            ReceiverConversion::ReadOnly => {
+                self.gen_term(receiver, None)?;
+                self.emit(Instr::ReadOnly);
             }
             ReceiverConversion::Load => {
                 self.gen_term(receiver, None)?;

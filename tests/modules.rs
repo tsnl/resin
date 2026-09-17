@@ -162,7 +162,7 @@ fn reexports_keep_binding_identity_through_diamond_imports() {
     let project = Project::new(&[
         (
             "base.resin",
-            "export { Number, make }; struct Number { value: i32, } fn make(counter: Ref<i32>) -> Number  { counter = counter + 1; Number { value = 42 } }",
+            "export { Number, make }; struct Number { value: i32, } fn make(counter: RefMut<i32>) -> Number  { counter = counter + 1; Number { value = 42 } }",
         ),
         (
             "left.resin",
@@ -678,7 +678,7 @@ fn free_operations_are_exported_independently_of_structs() {
         }
 fn counter_new(value: i32) -> Counter  { Counter { value = value } }
 
-fn add(self: Ref<Counter>, a: i32, b: i32)  { self.value = self.value + a + b; }
+fn add(self: RefMut<Counter>, a: i32, b: i32)  { self.value = self.value + a + b; }
 
 fn read(self: Ref<Counter>) -> i32  { self.value }
 
@@ -698,7 +698,7 @@ fn read(self: Ref<Counter>) -> i32  { self.value }
             "main.resin",
             r#"export { main }; import { "$/shared.resin", "counter.resin" };
             fn main() -> i32 | Err<_> {
-                let c_owner = arc_ptr_alloc(counter_new(30))?; let c: Ref<_> = c_owner:get().*;
+                let c_owner = arc_ptr_alloc(counter_new(30))?; let c: RefMut<_> = c_owner:get().*;
                 c:add(5, 7);
                 let mut p = c_owner:get();
                 if (p.*:read() == 42 && c:read() == 42) { 0 } else { 1 }

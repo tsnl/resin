@@ -212,10 +212,13 @@ pub enum Instr {
     PointerCast { ty: Ty },
     /// `[] -> [value]`: materialize an immediate; byte literals borrow static storage.
     Push { value: Value },
-    /// `[] -> [Ref<T>]`: borrow a local's storage without reading or initializing it.
+    /// `[] -> [RefMut<T>]`: borrow a local's storage without reading or initializing it.
     LocalRef { local: LocalId },
-    /// `[Ptr<T>] -> [Ref<T>]`: borrow a pointee, discarding pointer capabilities.
+    /// `[Ptr<T>] -> [RefMut<T>]`: borrow a pointee, discarding pointer capabilities.
     Borrow,
+    /// `[RefMut<T>] -> [Ref<T>]`: relinquish write permission on this reference.
+    /// Other aliases retain their own permissions.
+    ReadOnly,
     /// `[aggregate or address] -> [child or address]`: project by declaration index.
     /// A value operand copies the child and destroys the aggregate; raw addresses borrow.
     AccessStatic { index: usize },

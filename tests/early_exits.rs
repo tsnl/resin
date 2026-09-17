@@ -43,7 +43,7 @@ import { "$/shared.resin" };
         struct Resource { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
+fn drop(self: RefMut<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
         fn leave(trace: Ptr<i32>) -> i32  {
             let mut first = Resource { trace = trace, digit = 1 };
@@ -92,7 +92,7 @@ import { "$/shared.resin" };
         struct Resource { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
+fn drop(self: RefMut<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
         fn main() -> () | Err<_> {
             let trace_owner = arc_ptr_alloc(i32(0))?; let trace: Ref<_> = trace_owner:get().*;

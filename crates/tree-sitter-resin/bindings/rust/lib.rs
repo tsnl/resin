@@ -270,6 +270,7 @@ mod tests {
         for name in [
             "Ptr",
             "Ref",
+            "RefMut",
             "Err",
             "GpuArguments",
             "StrongOwner",

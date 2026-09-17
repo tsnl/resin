@@ -49,7 +49,7 @@ A few language choices explain much of the implementation:
 - Named structs move; primitives and aggregates containing only copyable values
   copy. HIR checks moves and definite initialization. Structs contain fields only;
   ordinary free functions supply operations, called directly or through UFCS colon
-  syntax. A free `drop(value: Ref<T>)` function supplies a destruction hook.
+  syntax. A free `drop(value: RefMut<T>)` function supplies a destruction hook.
 - `ArcPtr<T>` shares single values, and `ArcSpan<T>` shares fixed-length sequences.
   Weak owners observe them without keeping their payloads alive.
   `arc_span_alloc(count, initial)?` allocates initialized owned elements;
@@ -384,7 +384,7 @@ Inside the runtime, the useful landmarks are:
 
 Buffers make the host/device boundary concrete. The source `Span<T>` pairs a
 borrowed address with an element count. Arrays and spans return element references
-through `:at(index)` for reads or writes. A pointer-backed span or pointer to an
+through `:at(index)` for reads and `:at_mut(index)` for writes. A pointer-backed span or pointer to an
 array can provide an element pointer through `:lea(index)`; a local array cannot.
 Host indexing checks bounds, while shader indexing is unchecked.
 Host `GpuPtr<T>` and `GpuSpan<T>` retain their allocation and expose checked

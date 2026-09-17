@@ -7,14 +7,14 @@ fn primitive_operations_and_source_overloads_share_free_call_resolution() {
 import { "$/shared.resin" };
 
         struct Item { value: i32 }
-        fn at(value: Ref<Item>, index: u64) -> Ref<i32> { value.value }
+        fn at_mut(value: RefMut<Item>, index: u64) -> RefMut<i32> { value.value }
         fn first<T>(value: Ref<T>) -> _ { value:at(u64(0)) }
         fn main() -> i32 | Err<_> {
             let mut values = [i32(19), i32(23)];
-            let item_owner = arc_ptr_alloc(Item { value = 42 })?; let item: Ref<_> = item_owner:get().*;
-            at(values, u64(0)) = i32(20);
-            values:at(u64(1)) = i32(22);
-            at(item, u64(0)) = first(values) + values:at(u64(1));
+            let item_owner = arc_ptr_alloc(Item { value = 42 })?; let item: RefMut<_> = item_owner:get().*;
+            at_mut(values, u64(0)) = i32(20);
+            values:at_mut(u64(1)) = i32(22);
+            at_mut(item, u64(0)) = first(values) + values:at(u64(1));
             let old = replace(&item_owner:get().value, i32(0));
             assert(old == 42 && item.value == 0);
             assert(first(values) == 20);

@@ -4,7 +4,7 @@ struct Counter {
 	value: i32,
 }
 
-fn next(counter: Ref<Counter>) -> i32 {
+fn next(counter: RefMut<Counter>) -> i32 {
 	counter.value = counter.value + 1;
 	counter.value
 }

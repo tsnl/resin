@@ -18,7 +18,7 @@ struct ImageDataOwner {
 	channels: u32,
 	pixels: Ptr<u8>,
 }
-fn drop(self: Ref<ImageDataOwner>) {
+fn drop(self: RefMut<ImageDataOwner>) {
 	if (u64(self.pixels) != u64(0)) {
 		resin_image_free(self.pixels);
 	};

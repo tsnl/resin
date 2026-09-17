@@ -21,7 +21,7 @@ to `f64`. The `Complex<f32>` annotation chooses the recurrence's precision.
 
 `square:add(c)` uses a free function through UFCS: it means `add(square, c)`.
 The math helpers borrow `Ref<Complex<T>>` operands and return new values; they
-leave the inputs unchanged. Ref arguments require initialized places, so the
+cannot mutate the inputs through those references. Ref arguments require initialized places, so the
 square is bound to a local before the next call. No user-visible pointer is
 created. See [references](../references.md) for the contract.
 

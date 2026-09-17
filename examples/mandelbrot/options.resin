@@ -29,7 +29,7 @@ fn parse_options(args: Ref<Span<Ptr<u8>>>) -> Options | Err<_> {
 		screenshot = "mandelbrot.png".data,
 		help = false,
 	};
-	let parser = argparse(args, "--help|-h --cpu --gpu --width= --height= --iterations= --real= --imag= --span= --output= --screenshot=");
+	let mut parser = argparse(args, "--help|-h --cpu --gpu --width= --height= --iterations= --real= --imag= --span= --output= --screenshot=");
 	while (true) {
 		let item = match (parser:next()?) {
 			Argument(item) => {

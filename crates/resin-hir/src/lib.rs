@@ -187,8 +187,9 @@ pub enum Type {
     Pointer {
         pointee: Box<Type>,
     },
-    /// A fixed, nonowning binding to a place containing the referent.
+    /// A fixed, nonowning binding: read-only `Ref` or writable, aliasable `RefMut`.
     Reference {
+        mutable: bool,
         referent: Box<Type>,
     },
     /// The value type of an expression: unwrap a reference, otherwise preserve its type.
@@ -410,6 +411,8 @@ pub enum TermKind {
     Local {
         binding: BindingId,
         name: Ident,
+        /// Whether the source binding permits a writable borrow.
+        mutable: bool,
     },
     Function {
         function: FunctionId,
@@ -547,6 +550,7 @@ pub enum Statement {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiverConversion {
     Value,
+    ReadOnly,
     Borrow,
     Load,
 }
@@ -991,7 +995,7 @@ impl Analysis {
             .filter_map(|definition| self.operation_completion(&definition, receiver, replace))
             .collect::<Vec<_>>();
         let receiver = match receiver {
-            Type::Reference { referent } => referent.as_ref(),
+            Type::Reference { referent, .. } => referent.as_ref(),
             ty => ty,
         };
         let receiver = lower::infer::Type::from_hir(receiver);
@@ -1168,6 +1172,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
             "builtin_type"
                 | "Ptr"
                 | "Ref"
+                | "RefMut"
                 | "GpuPipelineContract"
                 | "GpuView"
                 | "GpuArguments"
@@ -1276,7 +1281,12 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "Ref",
-        "Ref<T>\n\nA fixed, nonowning reference to initialized T storage.",
+        "Ref<T>\n\nA fixed, nonowning read-only reference to initialized T storage. Does not grant an address.",
+        DefinitionKind::Type,
+    ),
+    (
+        "RefMut",
+        "RefMut<T>\n\nA fixed, nonowning writable reference to initialized T storage. Requires a mutable place; may be passed as Ref<T>. Does not grant an address or exclusive access.",
         DefinitionKind::Type,
     ),
     (

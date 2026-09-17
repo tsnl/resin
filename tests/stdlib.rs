@@ -42,7 +42,7 @@ fn slice_lea_returns_pointers_and_evaluates_the_index_once() {
     success(&run(
         r#"export { main };
         import { "$/span.resin", "$/shared.resin" };
-        fn index(calls: Ref<i32>) -> u64 { calls = calls + 1; u64(1) }
+        fn index(calls: RefMut<i32>) -> u64 { calls = calls + 1; u64(1) }
         fn first<T>(items: Ref<Span<T>>) -> Ptr<T> { items:lea(u64(0)) }
         fn main() -> () | Err<_> {
             let owner = arc_span_alloc::<i32>(u64(3), i32(0))?;
@@ -55,7 +55,7 @@ fn slice_lea_returns_pointers_and_evaluates_the_index_once() {
             let array = arc_ptr_alloc([[i32(1), i32(2)], [i32(3), i32(4)]])?;
             let row = array:get():lea(u64(1));
             row:lea(u64(0)).* = 42;
-            let reference: Ref<i32> = row:at(u64(1));
+            let reference: RefMut<i32> = row:at_mut(u64(1));
             reference = 19;
             assert(array:get():at(u64(1)):at(u64(0)) == 42 && row:at(u64(1)) == 19);
 
@@ -96,7 +96,7 @@ fn source_shared_elements_drop_in_reverse_and_unwind_on_allocation_failure() {
         struct Item { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Item>)  {
+fn drop(self: RefMut<Item>)  {
                 if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             }
 
@@ -107,12 +107,12 @@ fn drop(self: Ref<Item>)  {
             (())
         }
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             {
                 let items = arc_ptr_alloc([Item { trace = trace_owner:get(), digit = 0 }, Item { trace = trace_owner:get(), digit = 0 }, Item { trace = trace_owner:get(), digit = 0 }])?;
-                items:get().*:at(0).digit = 1;
-                items:get().*:at(1).digit = 2;
-                items:get().*:at(2).digit = 3;
+                items:get().*:at_mut(0).digit = 1;
+                items:get().*:at_mut(1).digit = 2;
+                items:get().*:at_mut(2).digit = 3;
             };
             let mut failed = match (fail(trace_owner:get())) { ()(value) => { 1 == 0 }, Err(error) => { 1 == 1 } };
             (if (failed && trace == 3214) { 0 } else { 1 })
@@ -130,12 +130,12 @@ fn source_owned_wrappers_retain_payloads_and_borrow_named_receivers() {
         struct Item { trace: Ptr<i32>, digit: i32,
             
         }
-fn drop(self: Ref<Item>)  {
+fn drop(self: RefMut<Item>)  {
                 if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; };
             }
 
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             let mut weak = weak_ptr_empty::<Item>();
             let mut valid = 1 == 1;
             {
@@ -146,7 +146,7 @@ fn drop(self: Ref<Item>)  {
                 valid = valid && copy:get().digit == 7 && { let borrowed = weak:upgrade()!; borrowed:get() }.digit == 7;
                 let mut values = arc_span_alloc::<u32>(3, u32(42))?;
                 let view = values:get();
-                view:at(2) = u32(9);
+                view:at_mut(2) = u32(9);
                 valid = valid && { let borrowed = values:get(); borrowed:at(0) } == u32(42) && { let borrowed = values:get(); borrowed:at(2) } == u32(9);
                 {
                     let extra = arc_span_alloc::<u32>(1, u32(13))?;
@@ -184,7 +184,7 @@ fn source_owners_allocate_initialized_typed_storage_and_reports_overflow() {
                 let alias = memory:clone();
                 let mut values = memory:get();
                 valid = valid && values.length == u64(4) && values:at(3) == u32(7);
-                values:at(3) = u32(42);
+                values:at_mut(3) = u32(42);
                 valid = valid && { let borrowed = alias:get(); borrowed:at(3) } == u32(42);
                 valid = valid && values:as_bytes().length == u64(4) * size_of(u32);
                 let mut upgraded = weak:upgrade()!;
@@ -244,7 +244,7 @@ fn shared_arrays_release_managed_elements_on_success_and_error() {
             digit: i32,
             
         }
-fn drop(self: Ref<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
+fn drop(self: RefMut<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* * 10 + self.digit; }; }
 
         fn item(trace: Ptr<i32>, digit: i32) -> (ArcPtr<Item> | Err<_>)  {
             let mut owner = arc_ptr_alloc::<Item>(Item { trace = trace, digit = 0 })?;
@@ -257,7 +257,7 @@ fn drop(self: Ref<Item>)  { if (self.digit != 0) { self.trace.* = self.trace.* *
             if (fail) { Err(Failed {}) } else { (()) }
         }
         fn main() -> (i32 | Err<_>)  {
-            let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<_> = trace_owner:get().*;
+            let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
             work(trace_owner:get(), 1 == 0)?;
             let mut valid = trace == 21;
             trace = 0;
@@ -309,7 +309,7 @@ fn generic_owned_span_methods_preserve_lifetimes_and_widened_results() {
                 let mut owner = allocate(2, u32(7))?;
                 weak = weaken(owner);
                 let mut view = borrowed(owner);
-                view:at(1) = u32(42);
+                view:at_mut(1) = u32(42);
                 valid = valid && view.length == u64(2) && { let borrowed = owner:get(); borrowed:at(1) } == u32(42);
                 valid = valid && match (widen_upgrade(weak)) {
                     ArcSpan<u32>(live) => { { let borrowed = live:get(); borrowed:at(1) } == u32(42) },
@@ -351,7 +351,7 @@ fn borrowed_span_slices_preserve_aliases_and_accept_empty_null_views() {
             let mut view = values:get();
             let mut middle = view:slice(1, 2);
             let alias = middle:clone();
-            alias:at(1) = u32(42);
+            alias:at_mut(1) = u32(42);
             let mut valid = middle.length == u64(2) && view:at(2) == u32(42);
             valid = valid && view:at(0) == u32(0) && view:at(3) == u32(0);
             let mut end = view:slice(view.length, 0);
@@ -539,7 +539,7 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
     ] {
         let output = run(
             &format!(
-                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\", \"$/stdio.resin\" }}; struct Cleanup {{  }}\nfn drop(self: Ref<Cleanup>)  {{ print(\"cleanup\\n\"); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0)])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
+                "export {{ main }}; import {{ \"$/shared.resin\", \"$/image.resin\", \"$/span.resin\", \"$/string.resin\", \"$/stdio.resin\" }}; struct Cleanup {{  }}\nfn drop(self: RefMut<Cleanup>)  {{ print(\"cleanup\\n\"); }}\n  fn main() -> (() | Err<_>)  {{ let mut path = \"missing/pixel.png\"; let buffer = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0)])?; let mut cleanup = Cleanup {{}}; {call}; (()) }}"
             ),
             "",
         );
@@ -834,7 +834,7 @@ fn byte_input_reports_stream_errors_instead_of_eof() {
         struct Cleanup {
             
         }
-fn drop(self: Ref<Cleanup>)  { print("cleanup\n"); }
+fn drop(self: RefMut<Cleanup>)  { print("cleanup\n"); }
 
 
         fn main() -> (() | Err<_>)  {
@@ -1217,7 +1217,7 @@ fn argparse_yields_aliases_values_and_duplicates_in_order() {
         fn main() -> () | Err<_> {
             let argv_owner = arc_ptr_alloc(["app".data, "-v".data, "--count=12".data, "-o".data, "a path.png".data,
                 "--count".data, "4294967295".data, "--real".data, "-0.125".data, "--output=".data])?; let argv: Ref<_> = argv_owner:get().*;
-            let parser = { let borrowed = Span<Ptr<u8>> { data = argv_owner:get():lea(u64(0)), length = u64(10) }; argparse(borrowed,
+            let mut parser = { let borrowed = Span<Ptr<u8>> { data = argv_owner:get():lea(u64(0)), length = u64(10) }; argparse(borrowed,
                 "  --verbose|-v --count= --output|-o= --real= ") };
             let flag = parser:next()?!;
             assert(flag:named("--verbose") && flag.value.length == u64(0));
@@ -1245,7 +1245,7 @@ fn argparse_reports_errors_and_numeric_parsing_respects_span_bounds() {
         import { "$/shared.resin", "$/argparse.resin", "$/span.resin", "$/string.resin" };
         fn rejected(option: str) -> () | Err<_> {
             let argv = arc_ptr_alloc(["app".data, option.data])?;
-            let parser = { let borrowed = Span<Ptr<u8>> { data = argv:get():lea(u64(0)), length = u64(2) }; argparse(borrowed, "--flag --count=") };
+            let mut parser = { let borrowed = Span<Ptr<u8>> { data = argv:get():lea(u64(0)), length = u64(2) }; argparse(borrowed, "--flag --count=") };
             assert(match (parser:next()) {
                 Err(message) => { message:get().length > u64(0) },
                 Argument(item) => { false }, None => { false },

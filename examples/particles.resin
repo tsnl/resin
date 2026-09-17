@@ -70,7 +70,7 @@ fn advance(p: Particle, dt: f32) -> Particle {
 @compute_shader
 fn kernel(index: u64, root: Ptr<Params>) -> () {
 	if (index < root.particles.length) {
-		let mut p: Ref<Particle> = root.particles:at(index);
+		let p: RefMut<Particle> = root.particles:at_mut(index);
 		p = advance(advance(p:clone(), root.dt), root.dt);
 	}
 }
@@ -238,7 +238,7 @@ fn fragment(color: Color) -> Color {
 }
 
 // Host-only xorshift32: reproducible random positions and independent velocities.
-fn random(state: Ref<u32>) -> f32 {
+fn random(state: RefMut<u32>) -> f32 {
 	let mut x = state;
 	x = x ^ (x << u32(13));
 	x = x ^ (x >> u32(17));
@@ -247,7 +247,7 @@ fn random(state: Ref<u32>) -> f32 {
 	f32(x & u32(0xffffff)) / f32(16777216.0)
 }
 
-fn random_particle(state: Ref<u32>) -> Particle {
+fn random_particle(state: RefMut<u32>) -> Particle {
 	Particle {
 		x = random(state) * f32(48.0) - f32(24.0),
 		y = random(state) * f32(60.0) - f32(30.0),
@@ -296,14 +296,14 @@ fn clamp(value: f32, low: f32, high: f32) -> f32 {
 	}
 }
 
-fn move_camera(camera: Ref<Camera>, dx: f64, dy: f64, scroll: f64) {
+fn move_camera(camera: RefMut<Camera>, dx: f64, dy: f64, scroll: f64) {
 	camera.yaw = camera.yaw + f32(dx) * f32(0.006);
 	// Stop short of the poles so dragging never flips the view upside down.
 	camera.pitch = clamp(camera.pitch + f32(dy) * f32(0.006), f32(-1.4), f32(1.4));
 	camera.zoom = clamp(camera.zoom * expf(clamp(f32(scroll), f32(-20.0), f32(20.0)) * f32(0.12)), f32(0.35), f32(3.0));
 }
 
-fn apply_camera<P>(camera: Ref<Camera>, params: Ref<P>) {
+fn apply_camera<P>(camera: Ref<Camera>, params: RefMut<P>) {
 	params.yaw_cos = cosf(camera.yaw);
 	params.yaw_sin = sinf(camera.yaw);
 	params.pitch_cos = cosf(camera.pitch);

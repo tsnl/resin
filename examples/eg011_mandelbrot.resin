@@ -120,10 +120,10 @@ fn channel(value: f32) -> u8 {
 }
 
 fn store_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
-	pixels:at(index * 4) = channel(color.r);
-	pixels:at(index * 4 + 1) = channel(color.g);
-	pixels:at(index * 4 + 2) = channel(color.b);
-	pixels:at(index * 4 + 3) = 255;
+	pixels:at_mut(index * 4) = channel(color.r);
+	pixels:at_mut(index * 4 + 1) = channel(color.g);
+	pixels:at_mut(index * 4 + 2) = channel(color.b);
+	pixels:at_mut(index * 4 + 3) = 255;
 }
 
 // Each segment owns up to 32 adjacent pixels in one row. Segment origins come
@@ -152,7 +152,7 @@ fn segments_new(width: u32, height: u32) -> ArcSpan<SegmentOrigin> | Err<_> {
 	while (y < height) {
 		let mut x: u32 = 0;
 		while (x < width) {
-			view:at(index) = (x, y);
+			view:at_mut(index) = (x, y);
 			index = index + 1;
 			x = x + pixels_per_segment;
 		};
@@ -259,7 +259,7 @@ fn renderer_new(gpu: Gpu, width: u32, height: u32) -> Renderer | Err<_> {
 	Renderer { gpu = gpu, graphics = graphics, compute = compute_pipeline, segments = segments, pixels = pixels, image = image }
 }
 
-fn resize(self: Ref<Renderer>, width: u32, height: u32) -> () | Err<_> {
+fn resize(self: RefMut<Renderer>, width: u32, height: u32) -> () | Err<_> {
 	let host_segments = segments_new(width, height)?;
 	let segment_view = host_segments:get();
 	self.segments = upload(self.gpu, segment_view)?;
@@ -335,7 +335,7 @@ fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
 // Application and input
 //
 
-fn zoom(plot: Ref<Plot>, factor: f32) {
+fn zoom(plot: RefMut<Plot>, factor: f32) {
 	// Keep neighboring pixels distinguishable with f32 coordinates.
 	let minimum = f32(plot.height) * 1.0e-6;
 	let next = plot.span * factor;
@@ -348,7 +348,7 @@ fn zoom(plot: Ref<Plot>, factor: f32) {
 	};
 }
 
-fn input(window: Ref<Window>, plot: Ref<Plot>, solver: Ref<Mandelbrot>) -> bool {
+fn input(window: Ref<Window>, plot: RefMut<Plot>, solver: RefMut<Mandelbrot>) -> bool {
 	if (!window:focused()) {
 		return false;
 	};

@@ -74,7 +74,7 @@ fn matches(token: Ref<Span<u8>>, name: Ref<Span<u8>>) -> bool {
 	false
 }
 
-fn next(self: Ref<ArgParser>) -> Argument | None | Err<String> {
+fn next(self: RefMut<ArgParser>) -> Argument | None | Err<String> {
 	if (self.index >= self.args.length) {
 		return None;
 	};
@@ -105,7 +105,7 @@ fn next(self: Ref<ArgParser>) -> Argument | None | Err<String> {
 	Err(fmt("Unknown option: {0}", (name:bytes(),)))
 }
 
-fn read_value(self: Ref<ArgParser>, text: Ref<Span<u8>>, separator: u64, required: bool) -> Span<u8> | Err<String> {
+fn read_value(self: RefMut<ArgParser>, text: Ref<Span<u8>>, separator: u64, required: bool) -> Span<u8> | Err<String> {
 	if (separator < text.length) {
 		if (!required) {
 			return Err(fmt("Flag does not take a value: {0}", (text:bytes(),)));

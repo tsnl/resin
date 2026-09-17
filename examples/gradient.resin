@@ -20,7 +20,7 @@ fn pixel(index: u32) -> u32 {
 @compute_shader
 fn kernel(index: u64, root: Ptr<Root>) {
 	if (index < u64(root.width) * u64(root.height) && index < root.pixels.length) {
-		root.pixels:at(index) = pixel(u32(index));
+		root.pixels:at_mut(index) = pixel(u32(index));
 	};
 }
 

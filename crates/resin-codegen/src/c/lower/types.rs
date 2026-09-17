@@ -145,7 +145,11 @@ impl<'a> Types<'a> {
             return;
         }
         emitted[self.id(ty)] = true;
-        if let Ty::Pointer { pointee } | Ty::Reference { referent: pointee } = ty {
+        if let Ty::Pointer { pointee }
+        | Ty::Reference {
+            referent: pointee, ..
+        } = ty
+        {
             self.pointer(pointee, emitted, out);
             writeln!(out, "typedef {} *{};", self.name(pointee), self.name(ty)).unwrap();
         }

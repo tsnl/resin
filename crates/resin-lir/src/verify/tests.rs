@@ -536,6 +536,7 @@ fn destruction_hooks_require_the_nominal_reference_signature() {
         VerifyErrorKind::InvalidDropHook
     );
     module.functions[0].locals[0].ty = Ty::Reference {
+        mutable: true,
         referent: Box::new(Ty::Defined {
             definition: TypeId::from_index(0),
         }),
@@ -649,6 +650,7 @@ fn explicit_loop_exits_require_an_enclosing_body() {
 #[test]
 fn local_references_cannot_be_retyped_returned_or_passed_as_pointers() {
     let reference = Ty::Reference {
+        mutable: true,
         referent: Box::new(Ty::Int32),
     };
     let pointer = Ty::Pointer {
@@ -725,4 +727,40 @@ fn local_references_cannot_be_retyped_returned_or_passed_as_pointers() {
         verify(&module).unwrap_err().kind,
         VerifyErrorKind::TypeMismatch { .. }
     ));
+}
+
+#[test]
+fn readonly_references_cannot_store_or_regain_write_permission() {
+    let local = Instr::LocalRef {
+        local: LocalId::from_index(0),
+    };
+    let mut module = expression_module(
+        Ty::Int32,
+        Ty::Unit,
+        vec![
+            local.clone(),
+            Instr::ReadOnly,
+            Instr::Push {
+                value: Value::Int32 { value: 42 },
+            },
+            Instr::Store,
+        ],
+    );
+    assert!(verify(&module).is_err());
+    module.functions[0].blocks[0].instrs = vec![
+        local.clone(),
+        Instr::ReadOnly,
+        Instr::Ascribe {
+            ty: Ty::Reference {
+                mutable: true,
+                referent: Box::new(Ty::Int32),
+            },
+        },
+        Instr::Discard,
+        Instr::Push { value: Value::Unit },
+    ];
+    assert!(verify(&module).is_err());
+    module.functions[0].blocks[0].instrs = vec![local, Instr::ReadOnly, Instr::Load];
+    module.functions[0].result = Ty::Int32;
+    verify(&module).unwrap();
 }

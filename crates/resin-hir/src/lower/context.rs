@@ -307,9 +307,12 @@ impl ReceiverConversion {
     pub(crate) fn between(from: &Ty, to: &Ty) -> Option<Self> {
         if from == to {
             Some(Self::Value)
-        } else if matches!(to, Ty::Reference { referent } if referent.as_ref() == from) {
+        } else if matches!((from, to), (Ty::Reference { mutable: true, referent: a }, Ty::Reference { mutable: false, referent: b }) if a == b)
+        {
+            Some(Self::ReadOnly)
+        } else if matches!(to, Ty::Reference { referent, .. } if referent.as_ref() == from) {
             Some(Self::Borrow)
-        } else if matches!(from, Ty::Reference { referent } if referent.as_ref() == to) {
+        } else if matches!(from, Ty::Reference { referent, .. } if referent.as_ref() == to) {
             Some(Self::Load)
         } else {
             None
@@ -328,7 +331,7 @@ pub(crate) struct IntrinsicMethod {
 pub(crate) fn is_primitive_operation(name: &str) -> bool {
     matches!(
         name,
-        "at" | "lea" | "replace" | "dispatch_native" | "draw_native"
+        "at" | "at_mut" | "lea" | "replace" | "dispatch_native" | "draw_native"
     )
 }
 
@@ -340,14 +343,14 @@ pub(crate) fn primitive_operation(
     use super::infer::{Head, Type};
     let receiver = solver.head(arguments.first()?);
     let receiver = match receiver {
-        Type::Node(Head::Reference, parts) => solver.head(&parts[0]),
+        Type::Node(Head::Reference { .. }, parts) => solver.head(&parts[0]),
         other => other,
     };
     let (_, mut signature) = intrinsic_methods(&receiver, solver)
         .into_iter()
         .find(|(candidate, _)| *candidate == name)?;
     if signature.op == Intrinsic::Index && matches!(receiver, Type::Node(Head::Array(_), _)) {
-        signature.params[0] = Type::reference(receiver);
+        signature.params[0] = Type::borrow(receiver, name == "at_mut");
     }
     Some(signature)
 }
@@ -428,6 +431,21 @@ pub(crate) fn intrinsic_methods(
                 result: Type::reference(element.clone()),
             },
         ));
+        if !matches!(base, Type::Node(Head::Atom(Ty::Str), _)) {
+            let mutable_receiver = if pointer_receiver {
+                receiver.clone()
+            } else {
+                Type::borrow(base.clone(), true)
+            };
+            methods.push((
+                "at_mut",
+                IntrinsicMethod {
+                    op: Intrinsic::Index,
+                    params: vec![mutable_receiver, Ty::UInt64.into()],
+                    result: Type::borrow(element.clone(), true),
+                },
+            ));
+        }
         if pointer_receiver || matches!(base, Type::Node(Head::Atom(Ty::Str), _)) {
             methods.push((
                 "lea",
@@ -452,6 +470,7 @@ pub(super) fn primitive_signature(
         pointee: Box::new(pointee),
     };
     let reference = |referent: Type| Type::Reference {
+        mutable: false,
         referent: Box::new(referent),
     };
     let optional = |ty| Type::Union {

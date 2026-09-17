@@ -1,6 +1,6 @@
 # Resin design
 
-The [reference specification](references.md) describes `Ref<T>`, fixed reference
+The [reference specification](references.md) describes read-only `Ref<T>`, writable `RefMut<T>`, fixed reference
 bindings, and reference-returning indexing.
 
 The [ownership specification](lifetimes.md) describes `ArcPtr<T>`, `ArcSpan<T>`,
@@ -48,7 +48,7 @@ when empty.
 
 Initialized locals receive automatic destruction in reverse scope order, including
 loop iterations and early returns through `?`. Return values are preserved before
-cleanup. Struct bodies contain only fields. A free `fn drop(value: Ref<T>)`
+cleanup. Struct bodies contain only fields. A free `fn drop(value: RefMut<T>)`
 declared alongside its type runs before its fields are released. Statement-only chain blocks yield unit.
 Process termination and traps do not unwind scopes.
 
