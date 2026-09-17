@@ -61,7 +61,7 @@ fn module() -> Module {
         .into(),
         ..Default::default()
     };
-    module.functions[1].profile = resin_lir::Profile::Shader;
+    module.functions[1].profile = resin_lir::Profile::Compute;
     module
 }
 

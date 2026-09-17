@@ -234,4 +234,4 @@ the shader failure path. Assertions remain enabled in optimized builds.
 
 `parallel_map` and `parallel_reduce` introduce nonescaping blocks with explicit
 parameters and read-only captures. See [Parallel blocks](parallel.md) for their
-syntax, ownership rules, and current serial host implementation.
+syntax, ownership rules, and host and cooperative compute schedules.

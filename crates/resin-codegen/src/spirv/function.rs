@@ -11,6 +11,8 @@ use rspirv::spirv::{
 };
 use std::collections::HashMap;
 
+mod workgroup;
+
 /// Emit a function and report whether it contains an invocation-failure exit.
 pub(super) fn lower(
     context: &mut Context<'_>,
@@ -51,6 +53,16 @@ pub(super) fn lower(
     let stacks = region_outputs(function, flow);
     let destinations = destinations(context, flow, &stacks.outputs, &stacks.tests)?;
     let arrays = array_variables(context, function, flow)?;
+    let cooperative = has_parallel(function);
+    let group = workgroup::Group::prepare(context, function)?;
+    let initialize = if let Some(group) = &group {
+        let merge = workgroup::leader(context, group.lane)?;
+        let zero = context.constant_u32(0);
+        context.builder.store(group.failed, zero, None, []).unwrap();
+        Some(merge)
+    } else {
+        None
+    };
     let mut aliases = HashMap::new();
     let mut arguments = arguments.into_iter();
     for (index, local) in locals.iter().take(function.parameter_count).enumerate() {
@@ -66,6 +78,10 @@ pub(super) fn lower(
                 .unwrap();
         }
     }
+    if let Some(merge) = initialize {
+        workgroup::end_leader(context, merge)?;
+        context.barrier()?;
+    }
     let mut lowering = FunctionLowering {
         context,
         function,
@@ -78,6 +94,10 @@ pub(super) fn lower(
         has_loop_test: stacks.tests.iter().map(Option::is_some).collect(),
         loop_targets: vec![],
         may_fail: false,
+        cooperative,
+        group,
+        failure_target: None,
+        iteration_output: None,
     };
     lowering.region(function.entry.index(), vec![], None)?;
     lowering.context.builder.end_function().unwrap();
@@ -111,6 +131,10 @@ struct FunctionLowering<'a, 'm> {
     has_loop_test: Vec<bool>,
     loop_targets: Vec<(usize, usize)>,
     may_fail: bool,
+    cooperative: bool,
+    group: Option<workgroup::Group>,
+    failure_target: Option<Word>,
+    iteration_output: Option<Word>,
 }
 
 fn variable(context: &mut Context<'_>, ty: &Ty, initial: Option<Word>) -> Result<Word, Error> {
@@ -126,7 +150,12 @@ fn local_variables(context: &mut Context<'_>, function: &Function) -> Result<Vec
     function
         .locals
         .iter()
-        .map(|local| {
+        .enumerate()
+        .map(|(index, local)| {
+            let private = function.blocks.iter().any(|block| matches!(&block.terminator, Terminator::Parallel { private_locals, .. } if private_locals.contains(&index)));
+            if has_parallel(function) && !private {
+                return context.shared_variable(&local.ty);
+            }
             let zero = context.zero(&local.ty)?;
             let id = variable(context, &local.ty, Some(zero))?;
             if let Some(name) = &local.name {
@@ -201,10 +230,35 @@ impl FunctionLowering<'_, '_> {
         exit: Option<ExitTarget>,
     ) -> Result<(), Error> {
         loop {
-            if self.instructions(block, &mut stack)? {
+            let finished = if self.cooperative {
+                self.scalar_instructions(block, &mut stack)?
+            } else {
+                self.instructions(block, &mut stack)?
+            };
+            if finished {
                 return Ok(());
             }
             match self.function.blocks[block].terminator {
+                Terminator::Parallel {
+                    ref operation,
+                    body,
+                    next,
+                    ..
+                } => {
+                    self.parallel(operation, body.index())?;
+                    block = next.index();
+                }
+                Terminator::ParallelYield => {
+                    self.context
+                        .builder
+                        .store(self.iteration_output.unwrap(), stack[0].id, None, [])
+                        .unwrap();
+                    self.context
+                        .builder
+                        .branch(self.failure_target.unwrap())
+                        .unwrap();
+                    return Ok(());
+                }
                 Terminator::If { then, els, next } => {
                     let Some(values) = self.selection(block, then.index(), els.index(), stack)?
                     else {
@@ -389,6 +443,10 @@ impl FunctionLowering<'_, '_> {
         // Record actual emitted failure exits, including failures propagated from
         // callees. No separate instruction classifier can drift from emission.
         self.may_fail = true;
+        if let Some(target) = self.failure_target {
+            self.context.builder.branch(target).unwrap();
+            return Ok(());
+        }
         let zero = self.context.zero(&self.function.result)?;
         self.context.builder.ret_value(zero).unwrap();
         Ok(())
@@ -592,6 +650,11 @@ fn output(
             stack.extend(flow.results[block][index].clone());
         }
         let (next, result) = match function.blocks[block].terminator {
+            Terminator::Parallel { body, next, .. } => {
+                output(function, flow, body.index(), outputs, tests);
+                (Some(next), Some(stack))
+            }
+            Terminator::ParallelYield => (None, None),
             Terminator::Return | Terminator::Break | Terminator::NextIteration => (None, None),
             Terminator::Merge | Terminator::LoopTest | Terminator::Continue => (None, Some(stack)),
             Terminator::If { then, els, next } => {
@@ -621,4 +684,11 @@ fn output(
         };
         block = next.index();
     }
+}
+
+fn has_parallel(function: &Function) -> bool {
+    function
+        .blocks
+        .iter()
+        .any(|block| matches!(block.terminator, Terminator::Parallel { .. }))
 }

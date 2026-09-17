@@ -91,6 +91,7 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
         vec![symbol(match function.profile {
             crate::Profile::Host => "host",
             crate::Profile::Shader => "shader",
+            crate::Profile::Compute => "compute",
         })],
     ));
     if let Some(foreign) = &function.foreign {
@@ -338,6 +339,23 @@ impl Blocks<'_> {
 
     fn terminator(&mut self, terminator: &Terminator) -> (SExp, Option<BlockId>) {
         match *terminator {
+            Terminator::ParallelYield => (symbol("parallel-yield"), None),
+            Terminator::Parallel {
+                ref operation,
+                ref private_locals,
+                body,
+                next,
+            } => (
+                list(
+                    "parallel",
+                    vec![
+                        symbol(format!("{operation:?}")),
+                        symbol(format!("{private_locals:?}")),
+                        list("body", self.region(body)),
+                    ],
+                ),
+                Some(next),
+            ),
             Terminator::Merge => (symbol("merge"), None),
             Terminator::LoopTest => (symbol("loop-test"), None),
             Terminator::Break => (symbol("break"), None),

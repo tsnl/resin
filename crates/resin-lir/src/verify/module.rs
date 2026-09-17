@@ -129,11 +129,15 @@ fn check_profiles(module: &Module) -> Result<(), VerifyError> {
             Location::function(entry),
         )?;
     }
-    for &entry in module.shaders.keys() {
+    for (&entry, shader) in &module.shaders {
         check_profile(
             module,
             entry,
-            crate::Profile::Shader,
+            if shader.stage.as_ref() == "compute" {
+                crate::Profile::Compute
+            } else {
+                crate::Profile::Shader
+            },
             Location::function(entry),
         )?;
     }
@@ -180,7 +184,9 @@ fn check_instruction_profiles(
 ) -> Result<(), VerifyError> {
     let host = |id| check_profile(module, id, crate::Profile::Host, location);
     match op {
-        crate::Instr::Function { function } => check_profile(module, *function, profile, location),
+        crate::Instr::Function { function } => {
+            check_profile(module, *function, profile.callee(), location)
+        }
         crate::Instr::GpuRayTracingPipeline { factory, .. }
         | crate::Instr::GpuComputePipeline { factory, .. }
         | crate::Instr::GpuGraphicsPipeline { factory, .. } => host(*factory),

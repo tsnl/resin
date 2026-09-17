@@ -19,6 +19,7 @@ pub(super) enum Index {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct LocalParameter {
     pub root: Ty,
+    pub storage: StorageClass,
     pub indices: Vec<Index>,
 }
 
@@ -30,7 +31,7 @@ pub(super) struct Signature {
 
 impl LocalParameter {
     pub(super) fn types(&self, context: &mut Context<'_>) -> Result<Vec<Word>, Error> {
-        let mut types = vec![context.pointer_type(StorageClass::Function, &self.root)?];
+        let mut types = vec![context.pointer_type(self.storage, &self.root)?];
         for index in &self.indices {
             if let Index::Dynamic { ty } = index {
                 types.push(context.ty(ty)?);
@@ -63,6 +64,7 @@ impl LocalParameter {
             id: root,
             local: Some(LocalAddress {
                 root,
+                storage: self.storage,
                 root_type: self.root.clone(),
                 indices,
             }),
@@ -87,6 +89,7 @@ pub(super) fn local_call(
             .map(|arg| {
                 arg.local.as_ref().map(|local| LocalParameter {
                     root: local.root_type.clone(),
+                    storage: local.storage,
                     indices: local
                         .indices
                         .iter()

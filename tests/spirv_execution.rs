@@ -134,12 +134,7 @@ fn execute<I: Copy, O: Copy>(source: &str, inputs: &[I], sentinel: O) -> Option<
         let mut commands = gpu.start_command_recording().unwrap();
         commands.set_pipeline(&pipeline).unwrap();
         commands
-            .dispatch(
-                root.device_pointer(),
-                (inputs.len() as u32).div_ceil(gpu.compute_workgroup_size()),
-                1,
-                1,
-            )
+            .dispatch(root.device_pointer(), inputs.len() as u32, 1, 1)
             .unwrap();
         gpu.submit(commands).unwrap();
         Some(
@@ -482,4 +477,94 @@ fn boolean_local_references_work_in_helpers_without_device_storage_layout() {
     };
     assert_eq!(&actual[..65], &[42; 65]);
     assert_eq!(actual[65], u32::MAX);
+}
+
+#[test]
+fn cooperative_map_reduce_runs_once_per_group_and_shares_results() {
+    let source = r#"
+        export { kernel };
+        struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
+        fn bump(value: RefMut<u32>) { value = value + u32(1); }
+        @compute_shader
+        fn kernel(group: u64, root: Ptr<Root>) {
+            let output = device_index(root.outputs, root.count, group);
+            bump(output.*);
+            let base = device_index(root.inputs, root.count, group).*;
+            let values = parallel_map([u32(0), u32(1), u32(2), u32(3), u32(4), u32(5)]) |x| { x + base };
+            let total = parallel_reduce(values, u32(7)) |a, b| { a + b };
+            output.* = output.* + total;
+        }
+    "#;
+    if let Some(values) = execute(source, &[10u32, 20, 30, 40, 50], 0u32) {
+        assert_eq!(values, [83, 143, 203, 263, 323, 0]);
+    }
+}
+
+#[test]
+fn cooperative_regions_handle_loops_large_arrays_and_nested_helpers() {
+    let batch = (0..129)
+        .map(|n| format!("u32({n})"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let source = format!(
+        r#"
+        export {{ kernel }};
+        struct Root {{ count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }}
+        fn read(value: Ref<u32>) -> u32 {{ value }}
+        fn inner(value: u32) -> u32 {{
+            let results = parallel_map([u32(1), u32(2)]) |x| {{ x * value }};
+            parallel_reduce(results, u32(0)) |a, b| {{ a + b }}
+        }}
+        @compute_shader
+        fn kernel(group: u64, root: Ptr<Root>) {{
+            let base = device_index(root.inputs, root.count, group).*;
+            let mut total = u32(0);
+            let mut round = u32(0);
+            while (round < u32(2)) {{
+                let values = parallel_map([{batch}]) |x| {{
+                    let nested = parallel_map([u32(0)]) |y| {{ x + y }};
+                    inner(nested(0)) + read(base) + round
+                }};
+                if (round == u32(0)) {{ total = parallel_reduce(values, u32(0)) |a, b| {{ a + b }}; }}
+                else {{ total = total + values(128); }};
+                round = round + u32(1);
+            }};
+            let identity = u32(7);
+            let one = parallel_reduce([u32(5)], u32(0)) |a, b| {{ a + b }};
+            device_index(root.outputs, root.count, group).* = total + identity + one;
+        }}
+    "#
+    );
+    if let Some(values) = execute(&source, &[1u32, 2, 3], 0u32) {
+        assert_eq!(values, [25295, 25425, 25555, 0]);
+    }
+}
+
+#[test]
+fn cooperative_failures_converge_before_barriers_and_leave_other_groups_running() {
+    let source = r#"
+        export { kernel };
+        struct Root { count: u64, inputs: Ptr<u32>, outputs: Ptr<u32> }
+        fn checked(value: u32, mode: u32) -> u32 {
+            if (mode == u32(1) && value == u32(2)) { assert(false); };
+            value + u32(1)
+        }
+        @compute_shader
+        fn kernel(group: u64, root: Ptr<Root>) {
+            let mode = device_index(root.inputs, root.count, group).*;
+            let output = device_index(root.outputs, root.count, group);
+            output.* = u32(1);
+            if (mode == u32(2)) { assert(false); };
+            let values = parallel_map([u32(0), u32(1), u32(2), u32(3), u32(4)]) |x| { checked(x, mode) };
+            output.* = u32(2);
+            let total = parallel_reduce(values, u32(0)) |a, b| {
+                if (mode == u32(3) && a == u32(2)) { assert(false); };
+                a + b
+            };
+            output.* = total;
+        }
+    "#;
+    if let Some(values) = execute(source, &[0u32, 1, 2, 3, 0], 0u32) {
+        assert_eq!(values, [15, 1, 1, 2, 15, 0]);
+    }
 }

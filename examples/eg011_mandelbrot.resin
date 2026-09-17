@@ -124,7 +124,7 @@ fn palette(count: i32) -> Color {
 	}
 }
 
-// One invocation handles up to 32 neighboring pixels. This is a work partition
+// One map iteration handles up to 32 neighboring pixels. This is a work partition
 // chosen by the application, not a claim that it is optimal for every GPU.
 const pixels_per_segment: u32 = 32;
 
@@ -161,7 +161,7 @@ fn store_pixel(pixels: Span<u8>, index: u64, color: Color) {
 
 // Each segment owns up to 32 adjacent pixels in one row. Integer division and
 // remainder recover its origin; the last segment stops at the right edge.
-// GPU dispatch rounds up to whole workgroups, so surplus invocations return.
+// GPU dispatch rounds up to batches of 32 segments, so surplus iterations return.
 // Valid segments write disjoint bytes and need no synchronization with each other.
 fn evaluate_segment(segment_index: u64, root: Ref<Parameters<Span<u8>>>) {
 	if (segment_index >= root.segment_count) {
@@ -211,12 +211,15 @@ fn host_image(plot: Plot, solver: Mandelbrot) -> ArcSpan<u8> | Err<_> {
 // GPU execution and presentation helpers
 //
 
-// The compute entry receives a global X invocation index and a root pointer.
+// The compute entry receives a workgroup X index and a root pointer.
+// An explicit map assigns 32 segments to its lanes, independent of physical width.
 // Dereferencing root gives a place the evaluator can borrow through Ref.
 // Ref permits access without promising an address; Ptr explicitly carries one.
 @compute_shader
-fn compute(segment_index: u64, root: Ptr<Parameters<Span<u8>>>) {
-	evaluate_segment(segment_index, root.*);
+fn compute(group: u64, root: Ptr<Parameters<Span<u8>>>) {
+	parallel_map([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) |offset| {
+		evaluate_segment(group * u64(32) + offset, root.*)
+	};
 }
 
 // Draw one oversized triangle covering the screen, with no vertex buffer.
@@ -284,10 +287,10 @@ fn parameters(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, start: u64, c
 }
 
 fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Plot, solver: Mandelbrot) -> () | Err<_> {
-	// compute_workgroup_size tells us how many invocations each group launches.
-	// Round each batch up to groups; cap it at the portable 65,535 X-group limit.
-	// start_segment lets large images continue in the next batch without overlap.
-	let group_size = self.gpu:compute_workgroup_size();
+	// Each logical group handles 32 segments, independently of physical lane count.
+	// Cap each dispatch at the portable 65,535 X-group limit; start_segment
+	// lets large images continue in the next batch without overlap.
+	let group_size = u64(32);
 	let capacity = 65535 * group_size;
 	let total = plot:segment_count();
 	let mut start: u64 = 0;

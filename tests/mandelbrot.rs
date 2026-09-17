@@ -149,7 +149,7 @@ fn compute_matches_cpu_for_partial_segments() {
             let count = u64(plot.width) * u64(plot.height) * u64(4);
             let pixels = gpu:alloc::<u8>(count + u64(1))?;
             let segments = plot:segment_count();
-            let group_size = gpu:compute_workgroup_size();
+            let group_size = u64(32);
             {
                 let sentinel = pixels:at(count);
                 sentinel:store(u8(123));

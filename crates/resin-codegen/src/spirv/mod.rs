@@ -12,6 +12,7 @@ mod ops;
 mod ray;
 mod symbols;
 mod types;
+mod workgroup;
 
 pub(super) fn generate(
     checked: resin_lir::Verified<'_>,
@@ -25,6 +26,9 @@ pub(super) fn generate(
         .ok_or_else(|| Error::unsupported("shader entry was not requested".into()))?;
     let mut context = Context::new(module, &analysis.types, &analysis.functions);
     ray::declare(&mut context, entry, stage, reachable)?;
+    if stage == Stage::Compute {
+        context.compute = Some(workgroup::Interface::declare(&mut context)?);
+    }
     for &function in reachable {
         let index = function.index();
         register_function_types(&mut context, index, &analysis.functions[index])?;
@@ -77,6 +81,9 @@ struct Context<'a> {
     // Emission completes each callee before its callers. Absence is not infallibility.
     fallibility: HashMap<Word, bool>,
     failed: Word,
+    compute: Option<workgroup::Interface>,
+    shared: Vec<Word>,
+    shared_bytes: usize,
     glsl: Word,
     types: HashMap<(Ty, types::Representation), Word>,
     u32_constants: HashMap<u32, Word>,
@@ -118,6 +125,9 @@ impl<'a> Context<'a> {
             local_call_depth: 0,
             fallibility: HashMap::new(),
             failed,
+            compute: None,
+            shared: vec![],
+            shared_bytes: 0,
             glsl,
             types: HashMap::new(),
             u32_constants: HashMap::new(),

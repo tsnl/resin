@@ -91,16 +91,16 @@ fn generic_helpers_preserve_copy_and_capture_contracts() {
 }
 
 #[test]
-fn shader_calls_report_the_unimplemented_cooperative_backend() {
-    let error = support::pipeline::source_module(
+fn shader_helpers_use_the_serial_schedule() {
+    let module = support::pipeline::source_module(
         r#"
         fn sum() -> i64 { parallel_reduce([1, 2, 3], 0) |a, b| { a + b } }
         @compute_shader fn kernel(index: u64, output: Ptr<i64>) { output.* = sum(); }
     "#,
     )
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains("cooperative workgroup lowering"), "{error}");
+    .unwrap();
+    let project = support::project::Project::new(&module, None).unwrap();
+    support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
 }
 
 #[test]
@@ -130,4 +130,57 @@ fn iteration_results_and_shared_captures_keep_their_owners_until_scope_exit() {
         }
     "#,
     );
+}
+
+#[test]
+fn cooperative_lir_checks_region_parameters_and_boundaries() {
+    let module = support::module(
+        r#"
+        @compute_shader fn kernel(group: u64, output: Ptr<u32>) {
+            let values = parallel_map([u32(1), u32(2)]) |x| { x + u32(1) };
+            output.* = values(0);
+        }
+    "#,
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    let bytes = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
+    assert!(
+        support::shaders::instructions(&bytes, 224).next().is_some(),
+        "map completion must synchronize its workgroup"
+    );
+    assert!(
+        support::shaders::instructions(&bytes, 59).any(|args| args[2] == 4),
+        "map results require Workgroup storage"
+    );
+    let function = module
+        .functions
+        .iter()
+        .position(|function| function.profile == resin_lir::Profile::Compute)
+        .unwrap();
+    let block = module.functions[function]
+        .blocks
+        .iter()
+        .position(|block| matches!(block.terminator, resin_lir::Terminator::Parallel { .. }))
+        .unwrap();
+    let mut bad = module.clone();
+    if let resin_lir::Terminator::Parallel { private_locals, .. } =
+        &mut bad.functions[function].blocks[block].terminator
+    {
+        private_locals.start = 0;
+    }
+    assert!(matches!(
+        resin_lir::verify(&bad).unwrap_err().kind,
+        resin_lir::VerifyErrorKind::InvalidParallelRegion
+    ));
+    let mut bad = module.clone();
+    let resin_lir::Terminator::Parallel { body, .. } =
+        bad.functions[function].blocks[block].terminator
+    else {
+        unreachable!()
+    };
+    bad.functions[function].blocks[body.index()].terminator = resin_lir::Terminator::Return;
+    assert!(matches!(
+        resin_lir::verify(&bad).unwrap_err().kind,
+        resin_lir::VerifyErrorKind::InvalidParallelRegion
+    ));
 }

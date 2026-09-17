@@ -70,14 +70,13 @@ fn kernel(index: u64, root: Ptr<Params>) -> ()  {
 ```
 The entry interfaces are:
 
-- Compute takes `(u64, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
-  to get the `u64` number of invocations per workgroup for that `Gpu`. The runtime
-  selects it from the device's reported default subgroup size, bounded by its workgroup
-  limits, and specializes each compute pipeline to match. The value stays fixed for
-  that GPU's lifetime. With `let mut workgroup_size = gpu:compute_workgroup_size();`, compute
-  dispatch groups with `u32((count + workgroup_size - u64(1)) / workgroup_size)`.
-  The index is the global X invocation index. Dispatch only in X (`y = z = 1`) and guard
-  any excess invocations in the function, as above.
+- Compute takes `(u64, Ptr<T>)` and returns `()`. The index is the workgroup's X
+  index; dispatch counts groups, with `y = z = 1`. Scalar code executes once per
+  group. Use [parallel blocks](parallel.md) directly in the entry to distribute a
+  logical batch across its physical lanes. For example, a batch of 32 elements
+  needs `u32((count + 31) / 32)` groups, regardless of the device's lane count.
+  `gpu:compute_workgroup_size()` reports the physical width, chosen from the
+  device's default subgroup size and workgroup limits and specialized per pipeline.
 - Vertex takes an `i32` vertex index, optionally paired with `Ptr<T>`, and returns
   `Vertex` with `position: Position` and `color: Color` fields.
   Position has `f32` fields `x, y, z, w`; Color has `r, g, b, a`, in those orders.
@@ -97,7 +96,7 @@ while (index < values.length) {
 struct HostParams { values: GpuSpan<f32>, scale: f32 }
 let pipeline = gpu:create_compute_pipeline(kernel)?;
 let commands = gpu:start_command_recording()?;
-commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
+commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 1024, 1, 1)?;
 commands:submit()?;
 ```
 

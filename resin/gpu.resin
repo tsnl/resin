@@ -152,6 +152,8 @@ fn native(self: Ref<Gpu>) -> Ptr<ResinGpu> {
 	self.owner:get().handle
 }
 
+/// Physical lanes per compute workgroup. Logical batches and dispatch group counts
+/// are chosen by the program independently of this width.
 fn compute_workgroup_size(self: Ref<Gpu>) -> u64 {
 	u64(resin_gpu_compute_workgroup_size(self:native()))
 }

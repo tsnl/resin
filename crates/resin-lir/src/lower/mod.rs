@@ -79,6 +79,7 @@ struct FunctionLowering<'types> {
     bindings: HashMap<BindingId, ValueBinding>,
     owned: Vec<Scope>,
     loop_scopes: Vec<usize>,
+    parallel_depth: usize,
 }
 impl FunctionLowering<'_> {
     fn gen_expression(&mut self, term: &Term, to: Option<&Ty>) -> Result<Ty, LowerError> {

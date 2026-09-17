@@ -136,12 +136,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
         let mut commands = gpu.start_command_recording().unwrap();
         commands.set_pipeline(&pipeline).unwrap();
         commands
-            .dispatch(
-                root.device_pointer(),
-                (COUNT as u32).div_ceil(gpu.compute_workgroup_size()),
-                1,
-                1,
-            )
+            .dispatch(root.device_pointer(), COUNT as u32, 1, 1)
             .unwrap();
         gpu.submit(commands).unwrap();
         let values = std::slice::from_raw_parts(values.host_pointer().cast::<Payload>(), COUNT + 1);
@@ -280,12 +275,7 @@ fn particles_compute_then_render_from_the_same_buffer() {
             let mut commands = gpu.start_command_recording().unwrap();
             commands.set_pipeline(&compute).unwrap();
             commands
-                .dispatch(
-                    root.device_pointer(),
-                    (count as u32).div_ceil(gpu.compute_workgroup_size()) + 1,
-                    1,
-                    1,
-                )
+                .dispatch(root.device_pointer(), (count as u32).div_ceil(32) + 1, 1, 1)
                 .unwrap();
             commands
                 .begin_rendering(&mut image, [0.0, 0.0, 0.0, 1.0])
@@ -596,12 +586,7 @@ fn execute_compute_values(gpu: &mut ResinGpu, spv: &[u8], expected: fn(u32) -> u
         let mut commands = gpu.start_command_recording().unwrap();
         commands.set_pipeline(&pipeline).unwrap();
         commands
-            .dispatch(
-                root.device_pointer(),
-                COUNT.div_ceil(gpu.compute_workgroup_size()),
-                1,
-                1,
-            )
+            .dispatch(root.device_pointer(), COUNT, 1, 1)
             .unwrap();
         gpu.submit(commands).unwrap();
         let values =

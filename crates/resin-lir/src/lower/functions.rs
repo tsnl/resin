@@ -77,6 +77,7 @@ impl<'types> FunctionLowering<'types> {
             bindings: Default::default(),
             owned: vec![super::Scope::default()],
             loop_scopes: vec![],
+            parallel_depth: 0,
         }
     }
 

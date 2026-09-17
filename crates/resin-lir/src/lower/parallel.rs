@@ -2,7 +2,7 @@
 //! until specialization; a cooperative schedule must be chosen before storage.
 use super::concrete::{ParallelParameter, Term};
 use super::{FunctionLowering, LowerError, ValueBinding};
-use crate::Instr;
+use crate::{Instr, ParallelOperation, Profile, Terminator};
 use resin_types::prelude::*;
 
 impl FunctionLowering<'_> {
@@ -13,6 +13,9 @@ impl FunctionLowering<'_> {
         body: &Term,
         expected: &Ty,
     ) -> Result<Ty, LowerError> {
+        if self.cooperative() {
+            return self.gen_cooperative(input, None, &[element], body, expected);
+        }
         let Ty::Array {
             length,
             element: result,
@@ -52,6 +55,9 @@ impl FunctionLowering<'_> {
         parameters: [&ParallelParameter; 2],
         body: &Term,
     ) -> Result<Ty, LowerError> {
+        if self.cooperative() {
+            return self.gen_cooperative(input, Some(identity), &parameters, body, &identity.ty);
+        }
         let Ty::Array { length, .. } = &input.ty else {
             return Err(LowerError::invalid_hir(
                 input.span,
@@ -87,8 +93,12 @@ impl FunctionLowering<'_> {
     }
 
     fn parallel_binding(&mut self, parameter: &ParallelParameter) {
-        let local = self.alloc_local(parameter.ty.clone(), Some(parameter.name.val.clone()));
+        let local = self.parallel_parameter(parameter);
         self.emit(Instr::SetLocal { local });
+    }
+
+    fn parallel_parameter(&mut self, parameter: &ParallelParameter) -> LocalId {
+        let local = self.alloc_local(parameter.ty.clone(), Some(parameter.name.val.clone()));
         self.bindings.insert(
             parameter.binding,
             ValueBinding {
@@ -96,5 +106,73 @@ impl FunctionLowering<'_> {
                 ty: parameter.ty.clone(),
             },
         );
+        local
+    }
+
+    fn cooperative(&self) -> bool {
+        self.function.profile() == Profile::Compute && self.parallel_depth == 0
+    }
+
+    fn gen_cooperative(
+        &mut self,
+        input: &Term,
+        identity: Option<&Term>,
+        parameters: &[&ParallelParameter],
+        body: &Term,
+        expected: &Ty,
+    ) -> Result<Ty, LowerError> {
+        self.enter_scope();
+        self.gen_term(input, None)?;
+        let input = self.save_top(&input.ty);
+        let identity = identity
+            .map(|value| {
+                self.gen_term(value, None)?;
+                Ok::<_, LowerError>(self.save_top(&value.ty))
+            })
+            .transpose()?;
+        let output = self.alloc_local(expected.clone(), None);
+        let height = self.function.stack_len();
+        let parent = self.function.position().0;
+        let iteration = self.new_block("parallel.body", 0, 0);
+        let next = self.new_block("parallel.next", height, 0);
+        self.switch(iteration);
+        self.enter_scope();
+        let first = self.function.local_count();
+        let left = self.parallel_parameter(parameters[0]);
+        let operation = if let Some(identity) = identity {
+            let right = self.parallel_parameter(parameters[1]);
+            ParallelOperation::Reduce {
+                input,
+                identity,
+                left,
+                right,
+                output,
+            }
+        } else {
+            ParallelOperation::Map {
+                input,
+                element: left,
+                output,
+            }
+        };
+        self.parallel_depth += 1;
+        self.gen_term(body, Some(&body.ty))?;
+        self.parallel_depth -= 1;
+        self.cleanup(self.owned.len() - 1, &body.ty);
+        self.owned.pop();
+        self.terminate(Terminator::ParallelYield);
+        let end = self.function.local_count();
+        self.switch(parent);
+        self.terminate(Terminator::Parallel {
+            operation,
+            private_locals: first..end,
+            body: iteration,
+            next,
+        });
+        self.switch(next);
+        self.emit(Instr::TakeLocal { local: output });
+        self.cleanup(self.owned.len() - 1, expected);
+        self.owned.pop();
+        Ok(expected.clone())
     }
 }

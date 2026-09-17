@@ -66,7 +66,11 @@ impl Specialization<'_, '_> {
         function: FunctionId,
         arguments: Vec<resin_hir::Type>,
     ) -> Result<FunctionId, Error> {
-        self.request_profile(function, arguments, self.instances.profile(self.current))
+        self.request_profile(
+            function,
+            arguments,
+            self.instances.profile(self.current).callee(),
+        )
     }
 
     fn host_bridge(&mut self, function: FunctionId) -> Result<FunctionId, Error> {
@@ -191,7 +195,7 @@ impl Specialization<'_, '_> {
         let previous_span = std::mem::replace(&mut self.span, source.span);
         let result = (|| {
             let ty = self.ty(&source.ty)?;
-            if self.instances.profile(self.current) == crate::Profile::Shader {
+            if self.instances.profile(self.current) != crate::Profile::Host {
                 if access == Access::Value && ty.needs_drop(self.instances.typer().definitions()) {
                     return Err(self.profile_error("shader cannot consume managed values: reference counting and destruction are host-only".into()));
                 }
@@ -240,13 +244,6 @@ impl Specialization<'_, '_> {
             name: source.name.clone(),
             ty: self.ty(&source.ty)?,
         })
-    }
-
-    fn require_host_parallel(&self) -> Result<(), Error> {
-        if self.instances.profile(self.current) == crate::Profile::Shader {
-            return Err(self.profile_error("parallel blocks currently have a host backend only; cooperative workgroup lowering is not implemented".into()));
-        }
-        Ok(())
     }
 
     fn arguments(&mut self, source: &resin_hir::Arguments) -> Result<concrete::Arguments, Error> {
@@ -971,7 +968,7 @@ impl Specialization<'_, '_> {
         expected: &Ty,
     ) -> Result<concrete::TermKind, Error> {
         let params = args.iter().map(|arg| arg.ty.clone()).collect::<Vec<_>>();
-        let signature = if self.instances.profile(self.current) == crate::Profile::Shader {
+        let signature = if self.instances.profile(self.current) != crate::Profile::Host {
             resin_types::shader::builtin_instance(self.instances.typer(), name, &params)
                 .map_err(|message| self.profile_error(message))?
         } else {
@@ -1060,7 +1057,7 @@ impl Specialization<'_, '_> {
             _ => None,
         };
         if let Some(name) = math {
-            if self.instances.profile(self.current) == crate::Profile::Shader {
+            if self.instances.profile(self.current) != crate::Profile::Host {
                 resin_types::shader::builtin_instance(self.instances.typer(), name, &args.params)
                     .map_err(|message| self.profile_error(message))?;
             } else {
@@ -1222,14 +1219,11 @@ impl Specialization<'_, '_> {
                 element,
                 body,
                 ..
-            } => {
-                self.require_host_parallel()?;
-                concrete::TermKind::ParallelMap {
-                    input: self.boxed(input)?,
-                    element: self.parallel_parameter(element)?,
-                    body: self.boxed(body)?,
-                }
-            }
+            } => concrete::TermKind::ParallelMap {
+                input: self.boxed(input)?,
+                element: self.parallel_parameter(element)?,
+                body: self.boxed(body)?,
+            },
             resin_hir::TermKind::ParallelReduce {
                 input,
                 identity,
@@ -1237,16 +1231,13 @@ impl Specialization<'_, '_> {
                 right,
                 body,
                 ..
-            } => {
-                self.require_host_parallel()?;
-                concrete::TermKind::ParallelReduce {
-                    input: self.boxed(input)?,
-                    identity: self.boxed(identity)?,
-                    left: self.parallel_parameter(left)?,
-                    right: self.parallel_parameter(right)?,
-                    body: self.boxed(body)?,
-                }
-            }
+            } => concrete::TermKind::ParallelReduce {
+                input: self.boxed(input)?,
+                identity: self.boxed(identity)?,
+                left: self.parallel_parameter(left)?,
+                right: self.parallel_parameter(right)?,
+                body: self.boxed(body)?,
+            },
             resin_hir::TermKind::While { cond, body } => concrete::TermKind::While {
                 cond: self.boxed(cond)?,
                 body: self.boxed(body)?,

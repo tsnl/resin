@@ -584,7 +584,7 @@ fn requesting_only_a_shader_does_not_create_host_instances_or_exports() {
     assert!(
         lir.functions
             .iter()
-            .all(|f| f.profile == resin_lir::Profile::Shader)
+            .all(|f| f.profile != resin_lir::Profile::Host)
     );
     assert!(!lir.shaders.values().next().unwrap().embedded);
     let mut invalid = lir.clone();

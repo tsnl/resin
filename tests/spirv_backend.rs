@@ -7,7 +7,7 @@ use support::shaders::{self, instructions};
 mod support;
 
 #[test]
-fn compute_workgroup_size_specializes_execution_mode_and_wide_index_arithmetic() {
+fn compute_workgroup_size_specializes_execution_mode_and_preserves_group_index() {
     let m = module(
         "export { kernel }; @compute_shader fn kernel(index: u64, output: Ptr<u64>)  { output.* = index; }",
     );
@@ -32,10 +32,11 @@ fn compute_workgroup_size_specializes_execution_mode_and_wide_index_arithmetic()
     let wide = instructions(&source, 21)
         .find(|args| args[1..] == [64, 0])
         .unwrap()[0];
-    let widened_width = instructions(&source, 113)
-        .find(|args| args[0] == wide && args[2] == width)
-        .unwrap()[1];
-    assert!(instructions(&source, 132).any(|args| args[0] == wide && args[3] == widened_width));
+    assert!(instructions(&source, 113).any(|args| args[0] == wide));
+    assert!(
+        !instructions(&source, 132).any(|args| args[0] == wide),
+        "group index is independent of lane count"
+    );
     if let Some(frontend) = shaders::optimizer() {
         let built = project.build(&toolchain::spirv(&frontend)).unwrap();
         let optimized =
@@ -72,7 +73,7 @@ fn shader_indexing_emits_no_bounds_checks() {
         for comparison in 172..=179 {
             assert_eq!(instructions(&source, comparison).count(), 0);
         }
-        assert_eq!(instructions(&source, 250).count(), 0);
+        assert_eq!(instructions(&source, 250).count(), 1);
         assert_eq!(failure_loads(&source), 0);
         if let Some(frontend) = shaders::optimizer() {
             let built = project.build(&toolchain::spirv(&frontend)).unwrap();
@@ -81,8 +82,8 @@ fn shader_indexing_emits_no_bounds_checks() {
                 std::fs::read(built.path(artifact.spirv().file_name().unwrap())).unwrap();
             assert_eq!(
                 instructions(&optimized, 250).count(),
-                0,
-                "unchecked indexing needs no branches after optimization"
+                1,
+                "only the scalar entry lane selection needs a branch"
             );
         }
     }
@@ -129,7 +130,7 @@ fn shader_calls_guard_only_helpers_with_emitted_failure_exits() {
         let project = support::project::Project::new(&module, None).unwrap();
         let shader = &project.generated.shaders()[0];
         let bytes = std::fs::read(shader.unoptimized_spirv()).unwrap();
-        assert_eq!(instructions(&bytes, 250).count(), checks, "{source}");
+        assert_eq!(instructions(&bytes, 250).count(), checks + 1, "{source}");
         assert_eq!(failure_loads(&bytes), loads, "{source}");
         shaders::validate(shader.unoptimized_spirv());
     }

@@ -55,6 +55,14 @@ impl FunctionBuilder {
         self.local(ty, name)
     }
 
+    pub(super) fn profile(&self) -> crate::Profile {
+        self.function.profile
+    }
+
+    pub(super) fn local_count(&self) -> usize {
+        self.function.locals.len()
+    }
+
     pub(super) fn result(&mut self, ty: Ty) {
         self.function.result = ty;
     }

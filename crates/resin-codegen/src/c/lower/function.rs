@@ -234,6 +234,11 @@ fn lower_exit(
 ) -> Result<(Vec<CStatement>, Option<usize>), Error> {
     let mut statements = Vec::new();
     let next = match types.module.functions[index].blocks[block].terminator {
+        Terminator::Parallel { .. } | Terminator::ParallelYield => {
+            return Err(Error::unsupported(
+                "cooperative regions require a compute entry".into(),
+            ));
+        }
         Terminator::Break | Terminator::NextIteration => {
             let (condition, output) = loop_target.expect("verified loop exit");
             let exiting = matches!(

@@ -1,13 +1,14 @@
 use crate::Error;
 use resin_lir::Instr;
 use resin_types::prelude::*;
-use rspirv::spirv::Word;
+use rspirv::spirv::{StorageClass, Word};
 
 /// Function addresses cannot become integer addresses in Vulkan shaders. Keep
 /// their projection paths until a load or store needs an OpAccessChain.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct LocalAddress {
     pub root: Word,
+    pub storage: StorageClass,
     pub root_type: Ty,
     pub indices: Vec<LocalIndex>,
 }

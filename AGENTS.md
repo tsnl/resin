@@ -38,7 +38,7 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   and concrete conversion rules in `resin-types`; LIR never
   chooses numeric defaults. Source-known failures are still diagnosed during HIR construction.
 - HIR function signatures retain named type binders; function references retain completed
-  type arguments. LIR keys instances by definition, normalized arguments, and Host/Shader
+  type arguments. LIR keys instances by definition, normalized arguments, and Host/Shader/Compute
   profile; each profile counts toward the original function's allowance. LIR reserves IDs before
   translating bodies. Calls, shader references, native bridges, and drop hooks use those IDs.
   Keep substitution and concrete builtin selection in the incoming concrete-body translation;
@@ -398,11 +398,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   Retain explicit region nodes and capture identities in HIR; check capture writes,
   mutable borrows, moves, and nonlocal exits during HIR construction. The initial
   serial host schedule supports inline arrays with known extents and copyable inputs;
-  shader specialization rejects these regions until cooperative lowering exists.
+  compute entries retain top-level regions in LIR with explicit private-local ranges.
+  Helpers and nested blocks use the serial schedule. SPIR-V shares group locals,
+  runs scalar regions once, distributes jobs, and converges failures before barriers.
   See `doc/parallel.md` and the staged design in `doc/cooperative-execution.md`.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
-  Compute entries take `(u64, Ptr<T>)` and return unit; their index is the global X invocation
-  index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
+  Compute entries take `(u64, Ptr<T>)` and return unit; their index is the workgroup X
+  index. Dispatch counts groups; explicit parallel blocks distribute their work. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   Pipeline creation accepts decorated shader declarations directly and requests their compiled
   representation internally. Shader functions have no bytecode property. Runtime shader aliases
   remain unsupported. Keep shader definitions inline in examples.

@@ -2,7 +2,7 @@
 
 **Status: draft design with an initial implementation.**
 [Parallel blocks](parallel.md) documents the implemented syntax, capture checks,
-and serial host execution. Everything described as planned below remains future
+serial host execution, and top-level cooperative compute execution. Everything described as planned below remains future
 work. The motivating limitations are tracked in [issue #235](https://github.com/tsnl/resin/issues/235).
 
 ## Ordinary functions, explicit parallel regions
@@ -47,11 +47,10 @@ completion, and captures remain alive until its workers finish. This does not
 impose a process-wide barrier. NUMA placement can influence scheduling without
 changing the program’s meaning. A serial schedule remains valid.
 
-**Migration required:** current compute entries are still per-invocation, with a
-global X invocation index. Changing them to workgroup entries must also change the
-meaning of their index, launch counts, examples, and tests. That migration is not
-part of the initial serial implementation. This design introduces no task or mesh
-shader support.
+**Implemented migration:** compute entries now receive the workgroup X index,
+and dispatch counts logical groups. Examples distribute fixed batches explicitly.
+Only parallel regions written directly in the entry cooperate; helpers and nested
+blocks remain serial. There is no task or mesh shader support.
 
 ## Workgroup size and storage
 
@@ -86,18 +85,19 @@ The following stages build on that representation:
 
 1. **Completed here:** syntax, inference, diagnostics, formatting and editor
    support, read-only captures, a serial host schedule over inline arrays, and an
-   executable manual example. Explicitly reject shader use for now.
+   executable manual example.
 2. **Host scheduling:** choose a runtime loop representation and bounded parallel
    tasks with scoped joins. Audit runtime reference counting and native resources
    before sharing them across workers: copyability is not thread safety. Resolve
    dynamic input/output allocation and failure behavior before exposing spans as
    map inputs.
-3. **Cooperative compute:** migrate the entry and dispatch contracts together;
-   retain structured parallel regions until a schedule assigns iterations,
-   storage, and barriers. Establish uniform collective participation, including
-   nested regions and branches. An assertion or arithmetic trap cannot simply
-   terminate one lane while peers wait at a barrier; define a group failure
-   protocol or reject unsupported paths first.
+3. **Completed prototype:** migrate the compute entry and dispatch contracts;
+   retain explicit LIR parallel regions and iteration-local storage ranges.
+   SPIR-V assigns strided map jobs and tree-reduction pairs, shares group locals,
+   and emits barriers. Leader execution and broadcasts make scalar decisions
+   uniform; a group failure flag converges traps before collective exits.
+   Nested blocks and helper calls remain serial. The first storage plan uses a
+   conservative portable 32 KiB budget; storage reuse remains future work.
 4. **Optimization and specialized operations:** subgroup reductions, fusion,
    distributed values, and matrix primitives after the baseline schedules agree.
 
@@ -126,8 +126,8 @@ vendor-specific extension for ordinary map/reduce programs.
 
 - How dynamic spans and output ownership fit the map result, and how callers
   express large logical batches without array literals.
-- How the launcher selects and caches workgroup-size pipeline variants, and the
-  exact migrated compute signature. Full residualized const generics are not a
+- How the launcher selects and caches workgroup-size pipeline variants, and additional
+  launch tuning controls. Full residualized const generics are not a
   prerequisite for the first backend.
 - How nested or divergent regions select legal collective schedules, including
   error/trap propagation and resource-limit diagnostics.

@@ -18,7 +18,13 @@ fn pixel(index: u32) -> u32 {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(group: u64, root: Ptr<Root>) {
+	parallel_map([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) |offset| {
+		item(group * u64(32) + offset, root)
+	};
+}
+
+fn item(index: u64, root: Ptr<Root>) {
 	if (index < u64(root.width) * u64(root.height) && index < root.pixels.length) {
 		root.pixels:at_mut(index) = pixel(u32(index));
 	};
@@ -36,7 +42,7 @@ fn main() -> (() | Err<_>) {
 	let mut root = HostRoot { width = width, height = height, pixels = pixels:clone() };
 	let mut commands = gpu:start_command_recording()?;
 
-	let mut workgroup_size = gpu:compute_workgroup_size();
+	let mut workgroup_size = u64(32);
 	let mut groups = u32((pixels.length + workgroup_size - u64(1)) / workgroup_size);
 	commands:dispatch(pipeline, root, groups, 1, 1)?;
 	commands:submit()?;

@@ -214,7 +214,7 @@ fn unsupported_shader_operations_fail_during_compilation_with_application_notes(
         error
             .related
             .iter()
-            .any(|note| note.message.contains("kernel") && note.message.contains("Shader"))
+            .any(|note| note.message.contains("kernel") && note.message.contains("Compute"))
     );
 }
 

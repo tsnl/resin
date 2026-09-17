@@ -295,6 +295,18 @@ pub enum Instr {
 /// loop-condition, and loop-body continuations need their own explicit terminator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Terminator {
+    /// Distribute a fixed array operation across the compute workgroup. The body
+    /// starts with an empty stack and ends with one `ParallelYield` value. Its
+    /// parameter and temporary locals occupy `private_locals`; all other compute
+    /// locals belong to the group. The parent stack is preserved into `next`.
+    Parallel {
+        operation: ParallelOperation,
+        private_locals: std::ops::Range<usize>,
+        body: BlockId,
+        next: BlockId,
+    },
+    /// Complete one parallel iteration, yielding its sole operand.
+    ParallelYield,
     /// Leave the nearest enclosing loop body, preserving its carried operands.
     Break,
     /// Restart the nearest enclosing loop from within its body or a nested selection.
@@ -329,6 +341,24 @@ pub enum Terminator {
     },
     /// Transfer the sole operand to the caller. Cleanup must already be explicit.
     Return,
+}
+
+/// Storage consumed and initialized by a cooperative region. Input, identity,
+/// and output are group locals; block parameters are private iteration locals.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParallelOperation {
+    Map {
+        input: LocalId,
+        element: LocalId,
+        output: LocalId,
+    },
+    Reduce {
+        input: LocalId,
+        identity: LocalId,
+        left: LocalId,
+        right: LocalId,
+        output: LocalId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -448,12 +478,26 @@ impl std::fmt::Display for ErrorKind {
 }
 impl std::error::Error for Error {}
 
-/// Semantic target of a concrete function instance. Shader stages share helper rules;
-/// their entry conventions are retained separately in `Module::shaders`.
+/// Semantic execution scope of a concrete function instance. Shader stages share
+/// per-invocation helpers; compute roots own collective regions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Profile {
     Host,
     Shader,
+    /// A compute entry executes scalar regions once per workgroup. Ordinary
+    /// calls made by it use the per-invocation Shader profile.
+    Compute,
+}
+
+impl Profile {
+    /// Calls within a compute region execute on the calling lane.
+    pub fn callee(self) -> Self {
+        if self == Self::Compute {
+            Self::Shader
+        } else {
+            self
+        }
+    }
 }
 
 /// One externally requested application. Arguments are closed HIR type expressions;
@@ -648,6 +692,7 @@ pub enum VerifyLocation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyErrorKind {
+    InvalidParallelRegion,
     InvalidGpuOperation,
     UnsupportedGpuElement { ty: Ty },
     InvalidVariant,

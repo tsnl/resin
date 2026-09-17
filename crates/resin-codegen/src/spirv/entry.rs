@@ -28,6 +28,46 @@ pub(super) fn lower(
         .map_err(build_error)?;
     context.builder.name(wrapper, "main");
     context.builder.begin_block(None).map_err(build_error)?;
+    let scalar_merge = if stage == Stage::Compute
+        && !function
+            .blocks
+            .iter()
+            .any(|block| matches!(block.terminator, resin_lir::Terminator::Parallel { .. }))
+    {
+        let uint = context.ty(&Ty::UInt32)?;
+        let vector = context.builder.type_vector(uint, 3);
+        let lane = context
+            .builder
+            .load(vector, None, variables.inputs[1], None, [])
+            .map_err(build_error)?;
+        let lane = context
+            .builder
+            .composite_extract(uint, None, lane, [0])
+            .map_err(build_error)?;
+        let zero = context.constant_u32(0);
+        let boolean = context.ty(&Ty::Bool)?;
+        let first = context
+            .builder
+            .i_equal(boolean, None, lane, zero)
+            .map_err(build_error)?;
+        let active = context.builder.id();
+        let merge = context.builder.id();
+        context
+            .builder
+            .selection_merge(merge, SelectionControl::NONE)
+            .map_err(build_error)?;
+        context
+            .builder
+            .branch_conditional(first, active, merge, [])
+            .map_err(build_error)?;
+        context
+            .builder
+            .begin_block(Some(active))
+            .map_err(build_error)?;
+        Some(merge)
+    } else {
+        None
+    };
     let inputs = variables.arguments(context, &interface)?;
     let result_type = context.ty(result)?;
     let output = context
@@ -36,6 +76,13 @@ pub(super) fn lower(
         .map_err(build_error)?;
     let may_fail = context.function_may_fail(context.functions[entry.index()]);
     variables.finish(context, &interface, result, output, may_fail)?;
+    if let Some(merge) = scalar_merge {
+        context.builder.branch(merge).map_err(build_error)?;
+        context
+            .builder
+            .begin_block(Some(merge))
+            .map_err(build_error)?;
+    }
     context.builder.ret().map_err(build_error)?;
     context.builder.end_function().map_err(build_error)?;
     declare_entry(context, wrapper, stage, &variables);
@@ -65,23 +112,11 @@ impl Variables {
         match interface {
             Interface::RayGeneration { .. } | Interface::RayHit { .. } => unreachable!("ray entry"),
             Interface::Compute { .. } => {
-                let uint = context.ty(&Ty::UInt32)?;
-                // The runtime's compute ABI specializes ID 0 for the selected GPU.
-                // One invocation is a valid default for standalone SPIR-V tools.
-                let width = context.builder.spec_constant_bit32(uint, 1);
-                context
-                    .builder
-                    .decorate(width, Decoration::SpecId, [Operand::LiteralBit32(0)]);
-                context.builder.name(width, "compute_workgroup_size");
-                variables.workgroup_size = Some(width);
-                let vector = context.builder.type_vector(uint, 3);
-                variables.input_builtin(context, vector, BuiltIn::WorkgroupId, "workgroup_id");
-                variables.input_builtin(
-                    context,
-                    vector,
-                    BuiltIn::LocalInvocationId,
-                    "local_invocation_id",
-                );
+                let group = context.compute.as_ref().unwrap();
+                variables.workgroup_size = Some(group.width);
+                variables.inputs.extend([group.group, group.lane]);
+                variables.interfaces.extend([group.group, group.lane]);
+                variables.interfaces.extend(&context.shared);
                 variables.push_constant(context)?;
             }
             Interface::Vertex { root, .. } => {
@@ -224,23 +259,7 @@ impl Variables {
                     .map_err(build_error)?,
             );
         }
-        // Widen before multiplication: the full global index need not fit u32.
-        let width = context
-            .builder
-            .u_convert(
-                word,
-                None,
-                self.workgroup_size.expect("compute stage workgroup size"),
-            )
-            .map_err(build_error)?;
-        let base = context
-            .builder
-            .i_mul(word, None, coordinates[0], width)
-            .map_err(build_error)?;
-        context
-            .builder
-            .i_add(word, None, base, coordinates[1])
-            .map_err(build_error)
+        Ok(coordinates[0])
     }
 
     fn color_record(

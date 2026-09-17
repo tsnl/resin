@@ -181,7 +181,7 @@ impl<'a> Instances<'a> {
                         .map_err(|error| self.lower_error(error, None, None))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let id = if entry.profile == Profile::Shader {
+            let id = if entry.profile != Profile::Host {
                 if !arguments.is_empty() {
                     return Err(self
                         .error(
@@ -234,7 +234,12 @@ impl<'a> Instances<'a> {
         };
         let mut shader = shader.clone();
         shader.embedded = embedded;
-        let id = self.request(definition, vec![], Profile::Shader, predecessor, location)?;
+        let profile = if shader.stage.as_ref() == "compute" {
+            Profile::Compute
+        } else {
+            Profile::Shader
+        };
+        let id = self.request(definition, vec![], profile, predecessor, location)?;
         self.shaders
             .entry(id)
             .and_modify(|old| old.embedded |= embedded)

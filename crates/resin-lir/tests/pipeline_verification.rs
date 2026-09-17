@@ -119,7 +119,7 @@ fn fixture() -> Module {
         ],
         ..Default::default()
     };
-    module.functions[2].profile = resin_lir::Profile::Shader;
+    module.functions[2].profile = resin_lir::Profile::Compute;
     module.functions[2].blocks[0].instrs = vec![Instr::Push { value: Value::Unit }];
     module.shaders.insert(
         id(2),

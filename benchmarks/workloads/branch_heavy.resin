@@ -14,7 +14,13 @@ struct Root {
 // Each lane follows a different, data-dependent branch on every iteration.
 // Keep this recurrence stable: it is the structured-control-flow baseline.
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(group: u64, root: Ptr<Root>) {
+	parallel_map([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) |offset| {
+		item(group * u64(32) + offset, root)
+	};
+}
+
+fn item(index: u64, root: Ptr<Root>) {
 	if (index < u64(root.count)) {
 		let mut lane = u32(index);
 		let mut x = lane * u32(747796405) + u32(2891336453);
@@ -36,7 +42,7 @@ fn kernel(index: u64, root: Ptr<Root>) {
 fn cpu(root: Ptr<Root>) {
 	let mut index: u64 = 0;
 	while (index < u64(root.count)) {
-		kernel(index, root);
+		item(index, root);
 		index = index + u64(1);
 	};
 }

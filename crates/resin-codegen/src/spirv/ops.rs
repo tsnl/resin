@@ -40,6 +40,7 @@ pub(super) fn instruction(
                 id: locals[local.index()],
                 local: Some(LocalAddress {
                     root: locals[local.index()],
+                    storage: context.local_storage(locals[local.index()]),
                     root_type: function.locals[local.index()].ty.clone(),
                     indices: path
                         .iter()
@@ -68,6 +69,7 @@ pub(super) fn instruction(
                 id: locals[local.index()],
                 local: Some(LocalAddress {
                     root: locals[local.index()],
+                    storage: context.local_storage(locals[local.index()]),
                     root_type: function.locals[local.index()].ty.clone(),
                     indices: vec![],
                 }),
@@ -187,7 +189,7 @@ fn local_pointer(
     if local.indices.is_empty() {
         return Ok(local.root);
     }
-    let ty = context.pointer_type(StorageClass::Function, pointee)?;
+    let ty = context.pointer_type(local.storage, pointee)?;
     let indices: Vec<_> = local
         .indices
         .iter()
@@ -317,6 +319,7 @@ fn index(
             context.builder.store(scratch, base.id, None, []).unwrap();
             let local = LocalAddress {
                 root: scratch,
+                storage: StorageClass::Function,
                 root_type: base.ty.clone(),
                 indices: vec![LocalIndex::Dynamic {
                     id: index.id,

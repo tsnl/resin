@@ -68,7 +68,13 @@ fn advance(p: Particle, dt: f32) -> Particle {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Params>) -> () {
+fn kernel(group: u64, root: Ptr<Params>) {
+	parallel_map([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]) |offset| {
+		item(group * u64(32) + offset, root)
+	};
+}
+
+fn item(index: u64, root: Ptr<Params>) -> () {
 	if (index < root.particles.length) {
 		let p: RefMut<Particle> = root.particles:at_mut(index);
 		p = advance(advance(p:clone(), root.dt), root.dt);
@@ -318,7 +324,7 @@ fn main() -> (() | Err<_>) {
 	let mut window = window_new(1280, 800, caption)?;
 
 	let mut gpu = gpu_new_for_window(window)?;
-	let mut workgroup_size = gpu:compute_workgroup_size();
+	let mut workgroup_size = u64(32);
 	let mut groups = u32((u64(count) + workgroup_size - u64(1)) / workgroup_size);
 
 	let mut compute = gpu:create_compute_pipeline(kernel)?;

@@ -5,11 +5,9 @@ function. Their bodies have explicit parameters and may read enclosing bindings.
 They are language expressions, not lambda values: a block cannot be stored,
 returned, or passed to another function.
 
-**Initial implementation:** inline arrays and a serial host backend. These forms
-currently provide reference behavior for the cooperative execution design; they
-do not yet create CPU workers or run in shaders. See the
-[cooperative execution proposal](cooperative-execution.md) for the planned GPU
-and host scheduling model.
+**Prototype:** a serial host schedule and cooperative GPU execution for blocks
+written directly in a compute entry. The host does not create worker threads.
+[Cooperative execution](cooperative-execution.md) explains the design and remaining work.
 
 ## Map and reduce
 
@@ -65,16 +63,43 @@ Each operation completes before the containing function continues. Its body uses
 a tail value; `return` and postfix `?` cannot exit the enclosing function from
 inside a parallel block. `break` and `continue` may target loops introduced inside
 the block, but cannot escape it. Handle error values inside the block or produce
-them as ordinary results. Traps retain the existing process-termination behavior;
-they do not unwind scopes.
+them as ordinary results. On the host, traps terminate the process without unwinding scopes. GPU failure
+behavior is described below.
+
+## Compute execution
+
+A compute entry receives the workgroup's X index. Its scalar code runs once per
+group; each top-level map distributes indices `lane, lane + width, ...` across
+the physical invocations. Reduce uses a pairwise tree in shared scratch storage,
+including the identity once. Batch lengths need not match the workgroup width.
+The runtime still specializes that width for the GPU.
+
+The compiler places group locals and intermediate arrays in workgroup memory;
+iteration locals are private. Barriers publish results before the next region,
+including writes through device pointers. Scalar branches and loops containing
+parallel regions take uniform decisions. A checked failure stops the affected
+group at the next collective boundary; other groups continue. Effects already
+performed are not rolled back. This is not a cross-workgroup barrier.
+
+Helpers and nested blocks use the serial schedule on each calling lane. This
+prototype distributes only regions written directly in the compute entry;
+calling a helper that contains a map does not introduce another collective.
+Vertex and fragment helpers also use serial execution.
 
 ## Current implementation limits
 
-The serial backend expands each source-known array element into an execution of
-the block. Code size therefore grows with the input extent and nested operations.
-This is a small-array reference implementation, not a performance feature yet.
-Shader specialization rejects parallel regions, including those reached through
-helpers, with an explicit unsupported-backend diagnostic.
+The serial schedule expands each array element, so host and nested code size
+grows with the input extent. GPU arrays must be nonempty, following the existing
+shader array restriction; the host supports empty arrays. Captured references
+retain the shader backend's existing restrictions on merging distinct local
+addresses.
+
+The initial GPU storage plan reserves all group locals rather than minimizing
+lifetimes or fusing operations. It enforces a conservative 32 KiB shared-storage
+budget, counting at least eight bytes per scalar slot and padding. Large batches
+receive a compilation diagnostic. This is a correctness prototype, not an
+optimized parallel-array implementation.
 
 There is no `parallel_filter`, general closure facility, or automatic purity
-analysis. Scheduling, fusion, and cooperative shader support are follow-up work.
+analysis. Host workers, dynamic spans, fusion, subgroup operations, and nested
+cooperative scheduling remain follow-up work.

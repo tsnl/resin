@@ -115,7 +115,7 @@ impl Device {
                     "dispatch",
                     commands.dispatch(
                         buffers.root.device_pointer(),
-                        buffers.count.div_ceil(self.gpu.compute_workgroup_size()),
+                        buffers.count.div_ceil(32),
                         1,
                         1,
                     ),
@@ -138,7 +138,7 @@ impl Device {
                 "dispatch",
                 commands.dispatch(
                     buffers.root.device_pointer(),
-                    buffers.count.div_ceil(self.gpu.compute_workgroup_size()),
+                    buffers.count.div_ceil(32),
                     1,
                     1,
                 ),

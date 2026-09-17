@@ -55,6 +55,9 @@ pub(super) fn check_function(
         entries: vec![None; function.blocks.len()],
         results: vec![Vec::new(); function.blocks.len()],
         operand_counts: vec![Vec::new(); function.blocks.len()],
+        parallel_result: None,
+        parallel_body: None,
+        private_owners: private_owners(function, function_location)?,
     };
     checker.visit(entry, Vec::new(), Region::Function, None)?;
     if let Some(block) = checker.entries.iter().position(Option::is_none) {
@@ -80,6 +83,9 @@ struct Regions<'a> {
     entries: Vec<Option<Vec<Ty>>>,
     results: Vec<Vec<Option<Ty>>>,
     operand_counts: Vec<Vec<usize>>,
+    parallel_result: Option<Ty>,
+    parallel_body: Option<BlockId>,
+    private_owners: Vec<Option<BlockId>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,6 +94,7 @@ enum Region {
     Selection,
     LoopCondition,
     LoopBody,
+    Parallel,
 }
 
 impl Regions<'_> {
@@ -111,6 +118,18 @@ impl Regions<'_> {
             self.entries[id.index()] = Some(stack.clone());
             for (i, instr) in block.instrs.iter().enumerate() {
                 let location = Location::instruction(self.function_id, id, i);
+                if let crate::Instr::LocalRef { local }
+                | crate::Instr::TakeLocal { local }
+                | crate::Instr::SetLocal { local }
+                | crate::Instr::ForgetLocal { local }
+                | crate::Instr::DropLocal { local }
+                | crate::Instr::TakeField { local, .. }
+                | crate::Instr::SetField { local, .. } = instr
+                    && let Some(Some(owner)) = self.private_owners.get(local.index())
+                    && self.parallel_body != Some(*owner)
+                {
+                    return Err(location.error(VerifyErrorKind::InvalidParallelRegion));
+                }
                 check_instr(self.module, self.function, instr, &mut stack, location)?;
                 let effect = super::stack_effect(instr);
                 self.operand_counts[id.index()].push(effect.pops);
@@ -121,6 +140,34 @@ impl Regions<'_> {
                     .push((effect.pushes == 1).then(|| stack.last().unwrap().clone()));
             }
             let (next, output) = match block.terminator {
+                Terminator::Parallel {
+                    ref operation,
+                    ref private_locals,
+                    body,
+                    next,
+                } => {
+                    if self.function.profile != crate::Profile::Compute
+                        || self.parallel_result.is_some()
+                    {
+                        return Err(location.error(VerifyErrorKind::InvalidParallelRegion));
+                    }
+                    let result = self.parallel(operation, private_locals, location)?;
+                    self.parallel_result = Some(result.clone());
+                    self.parallel_body = Some(body);
+                    if let Some(output) = self.visit(body, vec![], Region::Parallel, None)? {
+                        same_stack(&[result], &output, location)?;
+                    }
+                    self.parallel_result = None;
+                    self.parallel_body = None;
+                    (Some(next), Some(stack))
+                }
+                Terminator::ParallelYield => {
+                    if region != Region::Parallel {
+                        return Err(location.error(VerifyErrorKind::InvalidParallelRegion));
+                    }
+                    same_stack(&[self.parallel_result.clone().unwrap()], &stack, location)?;
+                    return Ok(Some(stack));
+                }
                 Terminator::Merge => {
                     if region != Region::Selection {
                         return Err(location.error(VerifyErrorKind::UnexpectedMerge));
@@ -147,6 +194,9 @@ impl Regions<'_> {
                     return Ok(None);
                 }
                 Terminator::Return => {
+                    if self.parallel_result.is_some() {
+                        return Err(location.error(VerifyErrorKind::InvalidParallelRegion));
+                    }
                     if stack.as_slice() != [self.function.result.clone()] {
                         return Err(location.error(VerifyErrorKind::InvalidReturnStack {
                             expected: self.function.result.clone(),
@@ -204,6 +254,109 @@ impl Regions<'_> {
         }
         Ok(())
     }
+
+    fn parallel(
+        &self,
+        operation: &crate::ParallelOperation,
+        private: &std::ops::Range<usize>,
+        location: Location,
+    ) -> Result<Ty, VerifyError> {
+        use crate::ParallelOperation;
+        let invalid = || location.error(VerifyErrorKind::InvalidParallelRegion);
+        if private.start < self.function.parameter_count
+            || private.start >= private.end
+            || private.end > self.function.locals.len()
+        {
+            return Err(invalid());
+        }
+        let local = |id: LocalId, is_private| {
+            if private.contains(&id.index()) != is_private
+                || (!is_private
+                    && self
+                        .private_owners
+                        .get(id.index())
+                        .is_some_and(Option::is_some))
+            {
+                return Err(invalid());
+            }
+            self.function
+                .locals
+                .get(id.index())
+                .map(|local| local.ty.clone())
+                .ok_or_else(invalid)
+        };
+        let (input, output) = match operation {
+            ParallelOperation::Map { input, output, .. }
+            | ParallelOperation::Reduce { input, output, .. } => (*input, *output),
+        };
+        let Ty::Array { length, element } = local(input, false)? else {
+            return Err(invalid());
+        };
+        match operation {
+            ParallelOperation::Map {
+                element: parameter, ..
+            } => {
+                if local(*parameter, true)? != *element {
+                    return Err(invalid());
+                }
+                let Ty::Array {
+                    length: result_length,
+                    element: result,
+                } = local(output, false)?
+                else {
+                    return Err(invalid());
+                };
+                if length != result_length {
+                    return Err(invalid());
+                }
+                Ok(*result)
+            }
+            ParallelOperation::Reduce {
+                identity,
+                left,
+                right,
+                ..
+            } => {
+                if [
+                    local(*identity, false)?,
+                    local(*left, true)?,
+                    local(*right, true)?,
+                    local(output, false)?,
+                ]
+                .iter()
+                .any(|ty| ty != element.as_ref())
+                {
+                    return Err(invalid());
+                }
+                Ok(*element)
+            }
+        }
+    }
+}
+
+fn private_owners(
+    function: &Function,
+    location: Location,
+) -> Result<Vec<Option<BlockId>>, VerifyError> {
+    let mut owners = vec![None; function.locals.len()];
+    for block in &function.blocks {
+        if let Terminator::Parallel {
+            ref private_locals,
+            body,
+            ..
+        } = block.terminator
+        {
+            let locals = owners
+                .get_mut(private_locals.clone())
+                .ok_or_else(|| location.error(VerifyErrorKind::InvalidParallelRegion))?;
+            for owner in locals {
+                if owner.replace(body).is_some() {
+                    return Err(location.error(VerifyErrorKind::InvalidParallelRegion));
+                }
+            }
+        }
+    }
+    Ok(owners)
 }
 
 fn same_stack(expected: &[Ty], found: &[Ty], location: Location) -> Result<(), VerifyError> {

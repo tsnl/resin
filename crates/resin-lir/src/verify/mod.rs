@@ -42,7 +42,7 @@ pub(super) fn analyze_cancellable(
         cancellation.check()?;
         crate::profile::function(&typer, FunctionId::from_index(index), function)
             .map_err(crate::profile::Error::verify)?;
-        if function.profile == crate::Profile::Shader {
+        if function.profile != crate::Profile::Host {
             crate::profile::stack_types(&typer, FunctionId::from_index(index), &functions[index])
                 .map_err(crate::profile::Error::verify)?;
         }
