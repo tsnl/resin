@@ -1373,6 +1373,22 @@ pub(crate) struct Overload {
     pub out: Type,
 }
 
+// A viable trial retains only its own inference state until selection commits it.
+struct ViableOverload {
+    matched: OverloadMatch,
+    solver: Solver,
+}
+
+enum OverloadMatch {
+    Application {
+        application: AppliedMethod,
+    },
+    Operation {
+        operation: Option<ResolvedMethod>,
+        complete: bool,
+    },
+}
+
 #[derive(Clone)]
 pub(crate) enum Constraint {
     Overload {
@@ -2006,33 +2022,12 @@ impl Inference<'_> {
         let mut rejected = Vec::new();
         for candidate in candidates {
             self.solver = baseline.clone();
-            if let Some(method) = self.typer.functions.get(&candidate.function).cloned()
-                && matches!(
-                    method.body,
-                    FunctionBody::GpuPipelineFactory { .. }
-                        | FunctionBody::GpuPipelineRecord { .. }
-                )
-            {
-                match self.pipeline_overload(&method, lookup, span) {
-                    Ok(Some((mut method, complete))) => {
-                        method.declaration = Some(candidate.declaration);
-                        viable.push((
-                            None,
-                            Some(ResolvedMethod::GpuPipeline { method }),
-                            self.solver.clone(),
-                            complete,
-                        ));
-                    }
-                    Ok(None) => {}
-                    Err(error) => rejected.push(error),
-                }
-                continue;
-            }
-            let matched = self.match_overload(candidate, lookup, span);
-            match matched {
-                Ok(application) => {
-                    viable.push((Some(application), None, self.solver.clone(), true))
-                }
+            match self.source_overload(candidate, lookup, span) {
+                Ok(Some(matched)) => viable.push(ViableOverload {
+                    matched,
+                    solver: self.solver.clone(),
+                }),
+                Ok(None) => {}
                 Err(error) => rejected.push(error),
             }
         }
@@ -2045,21 +2040,20 @@ impl Inference<'_> {
                 .as_ref()
                 .map_or(Ok(true), |expected| self.solver.coerce(out, expected, span));
             if let Ok(context) = context {
-                viable.push((None, operation, self.solver.clone(), complete && context));
+                viable.push(ViableOverload {
+                    matched: OverloadMatch::Operation {
+                        operation,
+                        complete: complete && context,
+                    },
+                    solver: self.solver.clone(),
+                });
             }
         }
         self.solver = baseline;
         if viable.len() == 1 {
-            let (application, operation, solver, complete) = viable.pop().unwrap();
+            let ViableOverload { matched, solver } = viable.pop().unwrap();
             self.solver = solver;
-            let Some(application) = application else {
-                if complete && let Some(operation) = operation {
-                    self.methods.insert(owner, operation);
-                }
-                return Ok(complete);
-            };
-            self.applications.insert(owner, application.clone());
-            return self.complete_overload(owner, application, args, out, span);
+            return self.select_overload(owner, matched, args, out, span);
         }
         let known = args.map_or_else(
             || self.solver.complete(out).is_some(),
@@ -2073,19 +2067,67 @@ impl Inference<'_> {
             return Err(error);
         }
         if !known || !viable.is_empty() {
+            // Other equations may still disambiguate these signatures. The
+            // solve loop reports ambiguity if they remain pending at its fixed point.
             return Ok(false);
         }
         Err(error(
             span,
-            if viable.is_empty() {
-                format!("no overload of `{name}` matches this signature")
-            } else {
-                format!(
-                    "ambiguous overload of `{name}`: {} signatures match",
-                    viable.len()
-                )
-            },
+            format!("no overload of `{name}` matches this signature"),
         ))
+    }
+
+    // Only signature checking happens inside a trial. Its caller discards trial
+    // errors for selection and restores inference state before the next candidate.
+    fn source_overload(
+        &mut self,
+        candidate: &OverloadCandidate,
+        lookup: &Overload,
+        span: Span,
+    ) -> Result<Option<OverloadMatch>> {
+        if let Some(method) = self.typer.functions.get(&candidate.function).cloned()
+            && matches!(
+                method.body,
+                FunctionBody::GpuPipelineFactory { .. } | FunctionBody::GpuPipelineRecord { .. }
+            )
+        {
+            let Some((mut method, complete)) = self.pipeline_overload(&method, lookup, span)?
+            else {
+                return Ok(None);
+            };
+            method.declaration = Some(candidate.declaration);
+            return Ok(Some(OverloadMatch::Operation {
+                operation: Some(ResolvedMethod::GpuPipeline { method }),
+                complete,
+            }));
+        }
+        self.match_overload(candidate, lookup, span)
+            .map(|application| Some(OverloadMatch::Application { application }))
+    }
+
+    fn select_overload(
+        &mut self,
+        owner: Rule,
+        matched: OverloadMatch,
+        args: Option<&[Type]>,
+        out: &Type,
+        span: Span,
+    ) -> Result<bool> {
+        match matched {
+            OverloadMatch::Application { application } => {
+                self.applications.insert(owner, application.clone());
+                self.complete_overload(owner, application, args, out, span)
+            }
+            OverloadMatch::Operation {
+                operation,
+                complete,
+            } => {
+                if complete && let Some(operation) = operation {
+                    self.methods.insert(owner, operation);
+                }
+                Ok(complete)
+            }
+        }
     }
 
     fn match_overload(

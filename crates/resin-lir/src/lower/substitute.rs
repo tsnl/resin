@@ -137,112 +137,10 @@ impl Substitution {
         let result = (|| {
             let mut matches = Vec::new();
             for function in &lookup.candidates {
-                let signature = instances.signature(*function)?;
-                if signature.params.len() != args.len() {
-                    continue;
-                }
-                if explicit
-                    .as_ref()
-                    .is_some_and(|args| args.len() != signature.type_params.len())
+                if let Some(candidate) =
+                    Self::source_operation_candidate(*function, &query, depth, state, instances)?
                 {
-                    continue;
-                }
-                let mut substitution = Self::default();
-                if let Some(explicit) = &explicit {
-                    substitution = Self::new(&signature.type_params, explicit)?;
-                }
-                let bound = signature.params.iter().zip(&args).enumerate().all(
-                    |(index, (parameter, arg))| {
-                        lookup.literal_arguments.contains(&index)
-                            || match_parameter(
-                                &parameter.annotation.ty,
-                                arg,
-                                &mut substitution.arguments,
-                                0,
-                            )
-                    },
-                );
-                if !bound {
-                    continue;
-                }
-                // All nonliteral operands determine binders first. A binder
-                // constrained only by a literal uses HIR's recorded fallback.
-                for &index in &lookup.literal_arguments {
-                    let Some(parameter) = signature.params.get(index) else {
-                        return Err(operation_error(
-                            "numeric operand index exceeds argument count",
-                        ));
-                    };
-                    let ty = value_type(&parameter.annotation.ty);
-                    if let resin_hir::Type::Parameter { parameter } = ty {
-                        substitution
-                            .arguments
-                            .entry(*parameter)
-                            .or_insert_with(|| args[index].clone());
-                    }
-                }
-                let Some(arguments) = signature
-                    .type_params
-                    .iter()
-                    .map(|parameter| substitution.arguments.get(&parameter.id).cloned())
-                    .collect::<Option<Vec<_>>>()
-                else {
-                    continue;
-                };
-                let candidate = (|| {
-                    let params = signature
-                        .params
-                        .iter()
-                        .map(|parameter| {
-                            substitution.normalize_at(
-                                &parameter.annotation.ty,
-                                depth + 1,
-                                state,
-                                instances,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    for (index, (param, arg)) in params.iter().zip(&args).enumerate() {
-                        let (target, source) = match param {
-                            resin_hir::Type::Reference { referent, .. } => {
-                                (referent.as_ref(), value_type(arg))
-                            }
-                            _ => (param, value_type(arg)),
-                        };
-                        let source = materialize(source, instances)?;
-                        let target = materialize(target, instances)?;
-                        let compatible = if lookup.literal_arguments.contains(&index) {
-                            numeric_literal_matches(&source, &target)
-                        } else {
-                            source.widens_to(&target)
-                        };
-                        if !compatible {
-                            return Ok(None);
-                        }
-                    }
-                    let result = substitution.normalize_at(
-                        &signature.result.ty,
-                        depth + 1,
-                        state,
-                        instances,
-                    )?;
-                    Ok(Some(ResolvedMethod {
-                        target: MethodTarget::Source {
-                            function: *function,
-                            arguments,
-                        },
-                        params,
-                        result,
-                    }))
-                })();
-                match candidate {
-                    Ok(Some(candidate)) => matches.push(candidate),
-                    Ok(None) => {}
-                    Err(super::LowerError {
-                        kind: crate::ErrorKind::InvalidInstance { .. },
-                        ..
-                    }) => {}
-                    Err(error) => return Err(error),
+                    matches.push(candidate);
                 }
             }
             if let Some(symbol) = &lookup.primitive {
@@ -316,6 +214,121 @@ impl Substitution {
         })();
         state.operations.remove(&query);
         result
+    }
+
+    fn source_operation_candidate(
+        function: FunctionId,
+        lookup: &resin_hir::OperationLookup,
+        depth: usize,
+        state: &mut Normalization,
+        instances: &mut super::instances::Instances<'_>,
+    ) -> Result<Option<ResolvedMethod>, super::LowerError> {
+        let args = &lookup.arguments;
+        let explicit = &lookup.type_args;
+        let signature = instances.signature(function)?;
+        if signature.params.len() != args.len() {
+            return Ok(None);
+        }
+        if explicit
+            .as_ref()
+            .is_some_and(|args| args.len() != signature.type_params.len())
+        {
+            return Ok(None);
+        }
+        let mut substitution = Self::default();
+        if let Some(explicit) = explicit {
+            substitution = Self::new(&signature.type_params, explicit)?;
+        }
+        let bound =
+            signature
+                .params
+                .iter()
+                .zip(args)
+                .enumerate()
+                .all(|(index, (parameter, arg))| {
+                    lookup.literal_arguments.contains(&index)
+                        || match_parameter(
+                            &parameter.annotation.ty,
+                            arg,
+                            &mut substitution.arguments,
+                            0,
+                        )
+                });
+        if !bound {
+            return Ok(None);
+        }
+        // All nonliteral operands determine binders first. A binder
+        // constrained only by a literal uses HIR's recorded fallback.
+        for &index in &lookup.literal_arguments {
+            let Some(parameter) = signature.params.get(index) else {
+                return Err(operation_error(
+                    "numeric operand index exceeds argument count",
+                ));
+            };
+            let ty = value_type(&parameter.annotation.ty);
+            if let resin_hir::Type::Parameter { parameter } = ty {
+                substitution
+                    .arguments
+                    .entry(*parameter)
+                    .or_insert_with(|| args[index].clone());
+            }
+        }
+        let Some(arguments) = signature
+            .type_params
+            .iter()
+            .map(|parameter| substitution.arguments.get(&parameter.id).cloned())
+            .collect::<Option<Vec<_>>>()
+        else {
+            return Ok(None);
+        };
+        let candidate = (|| {
+            let params = signature
+                .params
+                .iter()
+                .map(|parameter| {
+                    substitution.normalize_at(&parameter.annotation.ty, depth + 1, state, instances)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for (index, (param, arg)) in params.iter().zip(args).enumerate() {
+                let (target, source) = match param {
+                    resin_hir::Type::Reference { referent, .. } => {
+                        (referent.as_ref(), value_type(arg))
+                    }
+                    _ => (param, value_type(arg)),
+                };
+                let source = materialize(source, instances)?;
+                let target = materialize(target, instances)?;
+                let compatible = if lookup.literal_arguments.contains(&index) {
+                    numeric_literal_matches(&source, &target)
+                } else {
+                    source.widens_to(&target)
+                };
+                if !compatible {
+                    return Ok(None);
+                }
+            }
+            let result =
+                substitution.normalize_at(&signature.result.ty, depth + 1, state, instances)?;
+            Ok(Some(ResolvedMethod {
+                target: MethodTarget::Source {
+                    function,
+                    arguments,
+                },
+                params,
+                result,
+            }))
+        })();
+        // Only InvalidInstance rejects a substituted signature.
+        // Type errors, malformed HIR, and resource limits still propagate;
+        // selected function bodies are instantiated outside this trial.
+        match candidate {
+            Ok(candidate) => Ok(candidate),
+            Err(super::LowerError {
+                kind: crate::ErrorKind::InvalidInstance { .. },
+                ..
+            }) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     pub(super) fn method(

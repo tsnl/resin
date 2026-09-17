@@ -95,3 +95,45 @@ fn gpu_bridges_borrow_receivers_and_pipelines_through_native_generation() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn dependent_overloads_discard_invalid_result_signatures() {
+    let module = support::module(
+        r#"
+        export { main };
+        fn probe(value: bool) -> bool { value }
+        fn choose<T>(value: T) -> _ { probe(value) }
+        fn choose(value: i32) -> i32 { value }
+        fn forward<T>(value: T) -> _ { choose(value) }
+        fn main() -> i32 { forward(i32(42)) }
+        "#,
+    );
+    resin_lir::verify(&module).unwrap();
+}
+
+#[test]
+fn dependent_signature_type_errors_are_not_candidate_rejections() {
+    let hir = support::hir(
+        r#"
+        export { main };
+        fn choose<T>(value: T) -> _ { value.missing }
+        fn choose(value: i32) -> i32 { value }
+        fn forward<T>(value: T) -> _ { choose(value) }
+        fn main() -> i32 { forward(i32(42)) }
+        "#,
+    );
+    let errors =
+        support::frontend::lower(&hir, &[], &resin_lir::LoweringOptions::default()).unwrap_err();
+    assert!(
+        matches!(
+            errors[0].kind,
+            resin_lir::ErrorKind::Type {
+                kind: resin_types::TypeErrorKind::ExpectedRecord {
+                    found: resin_types::Ty::Int32
+                }
+            }
+        ),
+        "{:?}",
+        errors[0]
+    );
+}
