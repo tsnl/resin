@@ -16,7 +16,7 @@ export { Counter, increment };
 /// An integer counter.
 struct Counter {
     /// The current count.
-    value: int,
+    value: i32,
 }
 
 /// Increase the count by one.
@@ -49,7 +49,7 @@ readable. Ordinary Resin block comments, including documentation blocks, do not 
  *
  * Returns its current value without changing it.
  */
-fn read(counter: Ref<Counter>) -> int {
+fn read(counter: Ref<Counter>) -> i32 {
     counter.value
 }
 ```

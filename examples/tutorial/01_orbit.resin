@@ -1,0 +1,15 @@
+export { main };
+import { "fractal.resin", "$/math.resin" };
+
+// ANCHOR: assertions
+fn main() {
+	assert(escape_iterations(complex(0.0, 0.0), 256) == 0);
+	assert(escape_iterations(complex(-1.0, 0.0), 256) == 0);
+	assert(escape_iterations(complex(-2.0, 0.0), 256) == 0);
+	assert(escape_iterations(complex(0.0, 1.0), 256) == 0);
+	assert(escape_iterations(complex(1.0, 0.0), 256) == 3);
+	assert(escape_iterations(complex(2.0, 0.0), 256) == 2);
+	assert(escape_iterations(complex(3.0, 0.0), 256) == 1);
+	assert(escape_iterations(complex(2.0, 0.0), 1) == 0);
+}
+// ANCHOR_END: assertions

@@ -1,36 +1,27 @@
-# Free operations and colon calls
+# Function overloads and SFINAE
 
-Structs contain fields only. Operations are ordinary functions, declared and
-exported independently of the types they use. There are no method namespaces,
-inheritance, user-defined traits, or implicit `self` parameters.
+An **overload set** contains the visible functions with a particular name. A call
+selects a single applicable signature. **SFINAE** means “substitution failure is
+not an error”: if substituting the call's types makes a candidate signature
+inapplicable, that candidate is removed from consideration.
+
+For example, a generic `choose<T>(left: T, right: T)` cannot accept an `i32` and a
+`bool` together: they cannot both determine the same `T`. A separate
+`choose(left: i32, right: bool)` can remain applicable:
 
 ```resin
-struct Counter { value: int }
-fn read(counter: Ref<Counter>) -> int {
-	counter.value
-}
-fn increment(counter: Ref<Counter>) {
-	counter.value = counter.value + 1;
-}
-
-fn example() -> int {
-	let counter = Counter { value = 41 };
-	counter:increment();
-	counter:read()
-}
+fn choose<T>(left: T, right: T) -> T { left }
+fn choose(left: i32, right: bool) -> i32 { if (right) { left } else { 0 } }
+fn example() -> i32 { choose(i32(42), true) }
 ```
 
-`counter:read()` calls `read(counter)`. The receiver is the first ordinary
-argument, and its parameter can have any name. A `Ref<T>` parameter borrows
-storage; a value parameter moves a noncopyable argument. References permit
-unchecked mutation even through an immutable binding; `mut` controls direct
-assignment to the binding, not access through an alias. See [references](references.md).
+If no candidate remains, the call fails; if several remain, it is ambiguous. There
+is no “best overload” ranking.
 
-A dot selects a field: `(value.callback)(argument)` calls a function stored in a
-field. A colon selects a visible function: `value:callback(argument)` passes the
-value as its first argument. Colon calls do not search a type-owned namespace.
-A temporary can bind to a reference parameter and stays alive through the full
-expression, so `values:at(index):store(value)` is supported.
+This rule concerns the signature. Once a candidate is selected, an error in its
+body is an error in the program. The compiler does not try another overload to
+make that body work. Caller imports also cannot add candidates to a generic body
+that was defined in a different lexical scope.
 
 ## Overload resolution
 
@@ -42,18 +33,18 @@ one. Failed signature substitution removes a candidate; errors in a selected
 function's body remain errors and do not trigger fallback to another overload.
 
 ```resin
-fn combine(left: int, right: int) -> int {
+fn combine(left: i32, right: i32) -> i32 {
 	left + right
 }
-fn combine(left: int, right: bool) -> int {
+fn combine(left: i32, right: bool) -> i32 {
 	if (right) {
 		left
 	} else {
 		0
 	}
 }
-fn example() -> int {
-	20_i:combine(22_i) + combine(0_i, false)
+fn example() -> i32 {
+	i32(20):combine(i32(22)) + combine(i32(0), false)
 }
 ```
 
@@ -73,9 +64,9 @@ fn take<T>(cell: Cell<T>) -> T {
 fn replace_with<T, U>(cell: Cell<T>, value: U) -> Cell<U> {
 	Cell<U> { value = value }
 }
-fn example() -> int {
-	let cell = Cell<ulong> { value = 7 };
-	cell:replace_with::<ulong, int>(42):take()
+fn example() -> i32 {
+	let cell = Cell<u64> { value = 7 };
+	cell:replace_with::<u64, i32>(42):take()
 }
 ```
 
@@ -93,11 +84,11 @@ Operators use visible functions with Python-style names. Both operands participa
 in resolution, so relations need not belong to either operand's type.
 
 ```resin
-struct Vec2 { x: int, y: int }
+struct Vec2 { x: i32, y: i32 }
 fn __add__(left: Ref<Vec2>, right: Ref<Vec2>) -> Vec2 {
 	Vec2 { x = left.x + right.x, y = left.y + right.y }
 }
-fn __mul__(scale: int, value: Ref<Vec2>) -> Vec2 {
+fn __mul__(scale: i32, value: Ref<Vec2>) -> Vec2 {
 	Vec2 { x = scale * value.x, y = scale * value.y }
 }
 ```
@@ -138,20 +129,5 @@ no special meaning. Assignment, address-of, dereference, indexing, postfix `!`
 and `?`, and short-circuit `&&` / `||` keep their built-in behavior. Constant
 expressions do not execute source operator functions.
 
-## Indexing and destruction
 
-Arrays and `str` have primitive `at` operations; `Span<T>` supplies an ordinary
-free overload from `$/span.resin`. `items:at(index)` takes a `ulong` and returns
-`Ref<T>` (`Ref<ubyte>` for `str`). Write an element with `items:at(index) = value`
-and obtain a pointer with `items:lea(index)` on a pointer to an array, a span,
-or `str`. Local arrays support `at` only. Arrays also retain `items(index)`.
-Host indexing checks the declared length; shader indexing is unchecked.
-
-A free `fn drop(value: Ref<Item>) { ... }` declared with its nominal type supplies
-its destruction hook. A generic hook binds the owner's parameters. Direct calls
-remain ordinary calls; see [ownership and cleanup](lifetimes.md).
-
-Free functions may be shader entries or helpers. Helpers can borrow shader-local
-values using `Ref<T>`; see the [reference contract](references.md) for supported
-operations and current target limitations. Reference counting and custom destruction
-remain host-only.
+Continue with [type inference](inference.md) for omitted annotations and type arguments.

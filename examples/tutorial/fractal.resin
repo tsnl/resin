@@ -1,0 +1,75 @@
+// Small CPU checkpoints for the manual. The complete CPU/GPU explorer is eg011_mandelbrot.resin.
+export { escape_iterations, render };
+import { "$/math.resin", "$/span.resin", "$/shared.resin" };
+
+// ANCHOR: orbit
+fn escape_iterations(c: Complex<f32>, limit: i32) -> i32 {
+	let mut z: Complex<f32> = complex(0.0, 0.0);
+	let mut n: i32 = 0;
+	while (n < limit) {
+		let square = z:squared();
+		z = square:add(c);
+		n = n + 1;
+		if (z:magnitude_squared() > 4.0) {
+			return n;
+		};
+	};
+	0
+}
+// ANCHOR_END: orbit
+
+struct Color { r: f32, g: f32, b: f32, a: f32 }
+
+// ANCHOR: palette
+fn palette(count: i32) -> Color {
+	if (count == 0) {
+		return Color { r = 0.0, g = 0.0, b = 0.0, a = 1.0 };
+	};
+	// Repeating blue-to-gold bands; reserve black for bounded orbits.
+	let t = f32((count & 63) + 1) / 65.0;
+	let u = 1.0 - t;
+	Color {
+		r = 9.0 * u * t * t * t,
+		g = 15.0 * u * u * t * t,
+		b = 8.5 * u * u * u * t,
+		a = 1.0,
+	}
+}
+// ANCHOR_END: palette
+
+// ANCHOR: coordinates
+fn coordinate(x: f32, y: f32, width: u32, height: u32) -> Complex<f32> {
+	let scale = 3.0 / f32(height);
+	complex(-0.5 + (x - 0.5 * f32(width)) * scale, (0.5 * f32(height) - y) * scale)
+}
+// ANCHOR_END: coordinates
+
+// ANCHOR: pixel
+fn evaluate_pixel(x: u32, y: u32, width: u32, height: u32) -> Color {
+	let c = coordinate(f32(x) + 0.5, f32(y) + 0.5, width, height);
+	palette(escape_iterations(c, 256))
+}
+// ANCHOR_END: pixel
+
+// ANCHOR: render
+fn render(width: u32, height: u32) -> ArcSpan<u8> | Err<_> {
+	assert(width > 0 && height > 0);
+	let pixels = arc_span_alloc::<u8>(u64(width) * u64(height) * 4, 0)?;
+	let view = pixels:get();
+	let mut y: u32 = 0;
+	while (y < height) {
+		let mut x: u32 = 0;
+		while (x < width) {
+			let color = evaluate_pixel(x, y, width, height);
+			let index = (u64(y) * u64(width) + u64(x)) * 4;
+			view:at(index) = u8(color.r * 255.0 + 0.5);
+			view:at(index + 1) = u8(color.g * 255.0 + 0.5);
+			view:at(index + 2) = u8(color.b * 255.0 + 0.5);
+			view:at(index + 3) = 255;
+			x = x + 1;
+		};
+		y = y + 1;
+	};
+	pixels
+}
+// ANCHOR_END: render

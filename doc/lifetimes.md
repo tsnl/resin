@@ -8,11 +8,11 @@ User-defined `Copy`/`Clone` interfaces are deferred. Library `clone` functions a
 ordinary visible overloads.
 
 ```resin
-struct Item { value: int }
-fn consume(item: Item) -> int {
+struct Item { value: i32 }
+fn consume(item: Item) -> i32 {
 	item.value
 }
-fn example() -> int {
+fn example() -> i32 {
 	let item = Item { value = 42 };
 	let transferred = item;
 	// item is moved and cannot be read again.
@@ -59,11 +59,11 @@ aliases a place without consuming its value. Colon calls insert the receiver as
 the first ordinary argument.
 
 ```resin
-struct Item { value: int }
-fn read(item: Ref<Item>) -> int {
+struct Item { value: i32 }
+fn read(item: Ref<Item>) -> i32 {
 	item.value
 }
-fn example() -> int {
+fn example() -> i32 {
 	let item = Item { value = 21 };
 	read(item) + item:read()
 }
@@ -75,9 +75,8 @@ aliasing. They cannot transfer a noncopyable referent by reading it. Use
 initialized storage, without destroying the returned value. This is also available
 as `pointer:replace(replacement)`.
 
-Temporary function arguments can bind to `Ref<T>`. Their storage survives the full
-expression, including nested call chains, then receives cleanup. A reference that
-escapes that expression does not keep its temporary alive. See
+Ref arguments require initialized places. Bind computed values to locals before
+borrowing them; their cleanup follows those locals’ scopes. See
 [references](references.md) for argument rules and representation limits.
 
 ## Shared ownership
@@ -95,8 +94,8 @@ owns a descriptor; `ArcSpan<T>` owns its elements. There are no unsized payloads
 
 ```resin
 import { "$/shared.resin", "$/status.resin" };
-fn example() -> int | Err<OutOfMemory> {
-	let owner = arc_ptr_alloc(42_i)?;
+fn example() -> i32 | Err<OutOfMemory> {
+	let owner = arc_ptr_alloc(i32(42))?;
 	let retained = owner:clone(); // Retain the same allocation explicitly.
 	let moved = owner; // Transfer this handle; owner is now unavailable.
 	retained:get().* + moved:get().*

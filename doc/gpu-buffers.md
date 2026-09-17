@@ -9,14 +9,14 @@ need an explicit `$/span.resin` import.
 
 ```resin
 let gpu = gpu_new()?;
-let scalar = gpu:create(42)?;                  // GpuPtr<long>, inferred from the value
-let values = gpu:alloc::<float32>(1024)?;
-let mut index = 0_ul;
+let scalar = gpu:create(42)?;                  // GpuPtr<i64>, inferred from the value
+let values = gpu:alloc::<f32>(1024)?;
+let mut index: u64 = 0;
 while (index < values.length) {
-    values:at(index):store(1.0_f);
-    index = index + 1_ul;
+    values:at(index):store(f32(1.0));
+    index = index + u64(1);
 };
-let first = values:slice(0, 16);            // GpuSpan<float32>, same owner
+let first = values:slice(0, 16);            // GpuSpan<f32>, same owner
 let readable = first:read_only();
 ```
 
@@ -24,16 +24,16 @@ let readable = first:read_only();
 or result context; `gpu:create::<T>(initial)` supplies it explicitly.
 `gpu:alloc::<T>(count)` allocates uninitialized storage with checked layout and
 size arithmetic. Initialize elements before reading or using them in a shader.
-Both use default host-visible memory. Pass the exported `int` constants
+Both use default host-visible memory. Pass the exported `i32` constants
 `memory_default`, `memory_gpu`, or `memory_readback` to `gpu:alloc_in::<T>(count, memory)`
 to select a memory mode. Allocation methods are ordinary generic free functions and
 report a typed `RuntimeError`.
 
 GPU elements have the same host and shader layout and cannot contain pointers,
 spans, managed owners, or custom destruction hooks. Supported scalar storage is
-`ubyte`, `int`, `uint`, `long`, `ulong`, and `float32`, with arrays and records of
-these types. Unsuffixed floating literals require `float32` context or an `_f`
-suffix; the default `float64` has no supported shader storage layout.
+`u8`, `i32`, `u32`, `i64`, `u64`, and `f32`, with arrays and records of
+these types. Floating literals require `f32` context or an explicit `f32(...)`
+application; the default `f64` has no supported shader storage layout.
 
 ## Checked host access
 
@@ -64,20 +64,20 @@ Create pipelines from decorated shader declarations. The compiler preserves thei
 root type and stage, then checks host arguments when recording a dispatch or draw:
 
 ```resin
-struct Params { values: Span<float32>, scale: float32, }
+struct Params { values: Span<f32>, scale: f32, }
 
 @compute_shader
-fn kernel(index: ulong, root: Ptr<Params>)  {
+fn kernel(index: u64, root: Ptr<Params>)  {
     if (index < root.values.length) {
-        let mut value: Ref<float32> = root.values:at(index);
+        let mut value: Ref<f32> = root.values:at(index);
         value = value * root.scale;
     };
 }
 
-struct HostParams { values: GpuSpan<float32>, scale: float32, }
+struct HostParams { values: GpuSpan<f32>, scale: f32, }
 let pipeline = gpu:create_compute_pipeline(kernel)?;
 let commands = gpu:start_command_recording()?;
-commands:dispatch(pipeline, HostParams { values = values, scale = 2.0_f }, 16, 1, 1)?;
+commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
 commands:submit()?;
 ```
 
