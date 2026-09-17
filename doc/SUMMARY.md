@@ -39,6 +39,7 @@
   - [Compiler architecture](architecture.md)
   - [Maintaining the parser](parser.md)
   - [Design rationale](design.md)
+  - [Proposal: explicit GPU resource bindings](gpu-resource-bindings-proposal.md)
   - [Compiler-service validation](compiler-service-validation.md)
   - [CPU and GPU benchmarks](benchmarks.md)
   - [Compiler-service benchmarks](service-benchmarks.md)
