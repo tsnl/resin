@@ -135,6 +135,8 @@ ResinGpuPtr resin_gpu_ptr_offset(
    projected dispatch or draw is successfully recorded. */
 ResinArc *resin_gpu_projection_new(ResinGpuPtr root);
 void *resin_gpu_projection_root(ResinArc *projection);
+ResinDeviceAddress resin_gpu_projection_buffer(
+    ResinArc *projection, ResinGpuPtr value, size_t bytes, size_t alignment, uint32_t access);
 ResinDeviceAddress resin_gpu_projection_pointer(
     ResinArc *projection,
     ResinGpuPtr value,

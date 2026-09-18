@@ -22,6 +22,9 @@ pub(super) fn instruction(
     arrays: &HashMap<Ty, Word>,
 ) -> Result<Option<Slot>, Error> {
     let id = match instr {
+        Instr::GpuBufferLoad { .. } | Instr::GpuBufferStore => {
+            super::buffers::access(context, instr, args)?
+        }
         Instr::TraceRay { payload } => super::ray::trace(context, args, payload)?,
         Instr::RayHitInfo => super::ray::hit_info(context, result.unwrap())?,
         Instr::ForgetLocal { .. } | Instr::Discard => return Ok(None),
@@ -275,7 +278,7 @@ fn project(
         referent: pointee, ..
     } = &base.ty
     {
-        let offset = crate::layout::layout(context.module, pointee)?.offsets[index];
+        let offset = super::buffers::address_layout(context.module, pointee)?.offsets[index];
         let offset = context.constant_u64(offset as u64);
         emit(context, Op::IAdd, &Ty::UInt64, &[base.id, offset])?
     } else {
@@ -328,7 +331,7 @@ fn index(
         }
         _ => return Err(Error::unsupported("array required".into())),
     };
-    let size = crate::layout::layout(context.module, &element)?.size;
+    let size = super::buffers::address_layout(context.module, &element)?.size;
     let size = context.constant_u64(size as u64);
     let index = numeric_cast(context, &index.ty, &Ty::UInt64, index.id)?;
     let offset = emit(context, Op::IMul, &Ty::UInt64, &[index, size])?;

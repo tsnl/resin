@@ -5,6 +5,7 @@ use crate::Error;
 use resin_types::prelude::*;
 use rspirv::{binary::Assemble, dr::Builder, spirv::*};
 
+mod buffers;
 mod calls;
 mod entry;
 mod function;
@@ -34,7 +35,7 @@ pub(super) fn generate(
         // A reference to a local-only type has no device-address ABI. Emit only
         // its requested Function-storage specializations at the actual calls.
         if module.functions[index].locals[..module.functions[index].parameter_count].iter().any(|parameter| {
-            matches!(&parameter.ty, Ty::Reference { referent, .. } if resin_types::layout::layout(&module.types, referent).is_err())
+            matches!(&parameter.ty, Ty::Reference { referent, .. } if buffers::address_layout(module, referent).is_err())
         }) { continue; }
         let id = context.functions[index];
         let may_fail = function::lower(
@@ -167,7 +168,8 @@ fn register_function_types(
             Ty::Pointer { pointee }
             | Ty::Reference {
                 referent: pointee, ..
-            } => context.validate(pointee)?,
+            } => resin_types::shader::address_type(&context.module.types, pointee)
+                .map_err(Error::unsupported)?,
             _ => context.validate(ty)?,
         }
         context.ty(ty)?;

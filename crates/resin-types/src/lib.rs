@@ -128,6 +128,10 @@ pub struct GpuProjection {
 pub enum GpuProjectionKind {
     Pointer,
     Sequence,
+    /// A retained binding view; target records its element as Ptr<T>.
+    Buffer {
+        writable: bool,
+    },
 }
 
 /// A completed conversion plan. Each child identifies both representations;
@@ -142,6 +146,10 @@ pub struct GpuProjectionPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GpuProjectionOperation {
     Copy,
+    Buffer {
+        element: Ty,
+        writable: bool,
+    },
     Pointer {
         element: Ty,
     },
@@ -155,6 +163,15 @@ pub enum GpuProjectionOperation {
         element: Box<GpuProjectionPlan>,
         length: usize,
     },
+}
+
+/// Check a registered buffer view and return its element type and write permission.
+/// Its source representation is exactly (GpuView, u64); shader access borrows it.
+pub fn gpu_buffer_binding<'a>(
+    definitions: &'a [TypeDef],
+    ty: &Ty,
+) -> Result<(&'a Ty, bool), String> {
+    types::gpu_buffer_binding(definitions, ty)
 }
 
 /// Validate a source pipeline wrapper and its native owner facade.
@@ -467,6 +484,9 @@ impl Ty {
 /// Primitive operations selected by compiler methods or explicit intrinsic declarations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Intrinsic {
+    GpuBufferType,
+    GpuBufferLoad,
+    GpuBufferStore,
     TraceRay,
     RayHitInfo,
     GpuPointerProjection,
@@ -1064,8 +1084,12 @@ pub mod shader {
         super::typer::ray_payload(definitions, ty)
     }
 
-    /// Concrete value/storage types admitted by the shader profile. Managed reference
-    /// fields are opaque; copying or destroying them is a separate operation restriction.
+    /// Validate addressed shader storage without granting permission to copy opaque handles.
+    pub fn address_type(definitions: &[super::TypeDef], ty: &Ty) -> Result<(), String> {
+        super::typer::shader_address_type(definitions, ty)
+    }
+
+    /// Validate shader values. Reading opaque managed storage is host-only.
     pub fn value_type(definitions: &[super::TypeDef], ty: &Ty) -> Result<(), String> {
         super::typer::shader_value_type(definitions, ty)
     }

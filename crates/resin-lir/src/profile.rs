@@ -87,13 +87,14 @@ pub(crate) fn expression_type(typer: &TyperContext, ty: &Ty) -> Result<(), Strin
         }
         Ty::Reference {
             referent: pointee, ..
-        } => resin_types::shader::value_type(typer.definitions(), pointee),
+        } => resin_types::shader::address_type(typer.definitions(), pointee),
         _ => resin_types::shader::value_type(typer.definitions(), ty),
     }
 }
 
 fn instruction(typer: &TyperContext, op: &Instr) -> Result<(), String> {
     match op {
+        Instr::GpuBufferLoad { .. } | Instr::GpuBufferStore => Ok(()),
         Instr::TraceRay { payload } => resin_types::shader::ray_payload(typer.definitions(), payload),
         Instr::RayHitInfo => Ok(()),
         Instr::CallBuiltin { name, params, result } => {

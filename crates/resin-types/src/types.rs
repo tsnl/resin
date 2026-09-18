@@ -945,6 +945,16 @@ fn projection_operation(
             .map_err(|_| invalid())?
             .gpu_projection()
     {
+        if let GpuProjectionKind::Buffer { writable } = projection.kind {
+            let (element, _) = gpu_buffer_binding(definitions, source)?;
+            if source != target {
+                return Err(invalid());
+            }
+            return Ok(GpuProjectionOperation::Buffer {
+                element: element.clone(),
+                writable,
+            });
+        }
         if projection.target != *target
             || get(definitions, *definition)
                 .map_err(|_| invalid())?
@@ -954,6 +964,7 @@ fn projection_operation(
             return Err(invalid());
         }
         return match projection.kind {
+            GpuProjectionKind::Buffer { .. } => unreachable!("buffer handled above"),
             GpuProjectionKind::Pointer => {
                 let element =
                     projection_pointer(definitions, source, target).ok_or_else(invalid)?;
@@ -1073,4 +1084,34 @@ fn projection_pointer<'a>(
         return None;
     };
     pointee.gpu_element(definitions).then_some(pointee)
+}
+
+pub(super) fn gpu_buffer_binding<'a>(
+    definitions: &'a [TypeDef],
+    ty: &Ty,
+) -> Result<(&'a Ty, bool), String> {
+    let invalid = || "expected a registered buffer binding with plain elements".to_owned();
+    let Ty::Defined { definition } = ty else {
+        return Err(invalid());
+    };
+    let definition = get(definitions, *definition).map_err(|_| invalid())?;
+    let projection = definition.gpu_projection().ok_or_else(invalid)?;
+    let crate::GpuProjectionKind::Buffer { writable } = projection.kind else {
+        return Err(invalid());
+    };
+    let Ty::Pointer { pointee: element } = &projection.target else {
+        return Err(invalid());
+    };
+    let Some(Ty::Record { fields }) = definition.body() else {
+        return Err(invalid());
+    };
+    if definition.drop_hook().is_some()
+        || fields.len() != 2
+        || fields[0].ty != Ty::GpuView
+        || fields[1].ty != Ty::UInt64
+        || !element.gpu_element(definitions)
+    {
+        return Err(invalid());
+    }
+    Ok((element, writable))
 }

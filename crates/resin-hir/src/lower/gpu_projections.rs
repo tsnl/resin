@@ -12,6 +12,9 @@ pub(super) fn define(
     declaration: FunctionId,
     operation: &str,
 ) -> Result<bool, GenerateError> {
+    if matches!(operation, "gpu_buffer_load" | "gpu_buffer_store") {
+        return buffer_access(context, function, operation);
+    }
     if matches!(
         operation,
         "gpu_compute_pipeline_type"
@@ -21,6 +24,14 @@ pub(super) fn define(
         return pipeline(context, function, declaration, operation);
     }
     let (kind, op) = match operation {
+        "gpu_read_buffer_type" => (
+            GpuProjectionKind::Buffer { writable: false },
+            Intrinsic::GpuBufferType,
+        ),
+        "gpu_write_buffer_type" => (
+            GpuProjectionKind::Buffer { writable: true },
+            Intrinsic::GpuBufferType,
+        ),
         "gpu_pointer_projection" => (GpuProjectionKind::Pointer, Intrinsic::GpuPointerProjection),
         "gpu_span_projection" => (
             GpuProjectionKind::Sequence,
@@ -66,6 +77,18 @@ pub(super) fn define(
         return Err(invalid());
     };
     match kind {
+        GpuProjectionKind::Buffer { .. } => {
+            if fields.len() != 2
+                || fields[0].ty != Type::GpuView
+                || fields[1].ty != Type::UInt64
+                || *output
+                    != (Type::Pointer {
+                        pointee: Box::new(bound.clone()),
+                    })
+            {
+                return Err(invalid());
+            }
+        }
         GpuProjectionKind::Pointer => {
             if fields.len() != 1
                 || fields[0].ty != Type::GpuView
@@ -237,5 +260,75 @@ fn pipeline(
         .unwrap()
         .gpu_pipeline = Some(contract);
     super::primitives::body(function, Intrinsic::GpuPipelineType);
+    Ok(true)
+}
+
+fn buffer_access(
+    context: &Context,
+    function: &mut Function,
+    operation: &str,
+) -> Result<bool, GenerateError> {
+    let invalid = || {
+        GenerateError::inference(
+            function.signature.result.span,
+            format!("invalid buffer access signature or permission for intrinsic `{operation}`"),
+        )
+    };
+    let [parameter] = function.signature.type_params.as_slice() else {
+        return Err(invalid());
+    };
+    let element = Type::Parameter {
+        parameter: parameter.id,
+    };
+    let params = &function.signature.params;
+    let Some(first) = params.first() else {
+        return Err(invalid());
+    };
+    let Type::Reference {
+        mutable: false,
+        referent,
+    } = &first.annotation.ty
+    else {
+        return Err(invalid());
+    };
+    let Type::Defined {
+        definition,
+        arguments,
+    } = referent.as_ref()
+    else {
+        return Err(invalid());
+    };
+    let source = context
+        .nominal_schemes
+        .get(definition)
+        .ok_or_else(invalid)?;
+    let projection = source.gpu_projection.as_ref().ok_or_else(invalid)?;
+    let GpuProjectionKind::Buffer { writable } = projection.kind else {
+        return Err(invalid());
+    };
+    if substitute(&projection.target, &source.type_params, arguments.clone())
+        != Some(Type::Pointer {
+            pointee: Box::new(element.clone()),
+        })
+    {
+        return Err(invalid());
+    }
+    let write = operation == "gpu_buffer_store";
+    let count = if write { 3 } else { 2 };
+    if params.len() != count
+        || params[1].annotation.ty != Type::UInt64
+        || (write && (!writable || params[2].annotation.ty != element))
+        || function.signature.result.ty != (if write { Type::Unit } else { element })
+    {
+        return Err(invalid());
+    }
+    super::primitives::body(
+        function,
+        if write {
+            Intrinsic::GpuBufferStore
+        } else {
+            Intrinsic::GpuBufferLoad
+        },
+    );
     Ok(true)
 }

@@ -1,0 +1,40 @@
+//! Explicit typed buffer bindings for shader resource records.
+//! Bindings retain their allocation on the host. Shaders borrow bindings and
+//! access their elements through load/store; binding objects are not buffer data.
+export { Buffer, BufferMut, read_buffer, write_buffer, load, store };
+import { "$/gpu.resin", "$/span.resin" };
+
+/// A retained read-only buffer view. Reads beyond length return a zero value.
+struct Buffer<T> { view: GpuView, length: u64 }
+/// A retained read/write buffer view. Writes beyond length are ignored.
+struct BufferMut<T> { view: GpuView, length: u64 }
+
+intrinsic "gpu_read_buffer_type" fn read_type<T>(value: Buffer<T>) -> Ptr<T>;
+intrinsic "gpu_write_buffer_type" fn write_type<T>(value: BufferMut<T>) -> Ptr<T>;
+intrinsic "gpu_view_restrict" fn restrict(view: GpuView, access: u32) -> GpuView;
+
+/// Borrow a GPU allocation or slice as a retained read-only binding.
+fn read_buffer<T>(source: Ref<GpuSpan<T>>) -> Buffer<T> {
+	Buffer<T> { view = restrict(source.data.view, 1), length = source.length }
+}
+/// Borrow a GPU allocation or slice as a retained read/write binding.
+/// Recording checks that the original view grants both permissions.
+fn write_buffer<T>(source: Ref<GpuSpan<T>>) -> BufferMut<T> {
+	BufferMut<T> { view = source.data.view, length = source.length }
+}
+
+/// Read one element. Out-of-range reads return zero on both CPU and GPU.
+intrinsic "gpu_buffer_load" fn load<T>(source: Ref<Buffer<T>>, index: u64) -> T;
+/// Read one element. Out-of-range reads return zero on both CPU and GPU.
+intrinsic "gpu_buffer_load" fn load<T>(source: Ref<BufferMut<T>>, index: u64) -> T;
+/// Write one element. Out-of-range writes are ignored on both CPU and GPU.
+intrinsic "gpu_buffer_store" fn store<T>(destination: Ref<BufferMut<T>>, index: u64, value: T) -> ();
+
+/// Host span adapter for shared storage algorithms. Index must be in range.
+fn load<T>(source: Ref<Span<T>>, index: u64) -> T {
+	source:at(index)
+}
+/// Host span adapter for shared storage algorithms. Index must be in range.
+fn store<T>(destination: Ref<Span<T>>, index: u64, value: T) {
+	destination:at_mut(index) = value;
+}

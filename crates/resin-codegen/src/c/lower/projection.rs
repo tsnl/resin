@@ -98,6 +98,17 @@ fn project_value(
     let (_, destination) = representation(types, &plan.target, destination);
     match &plan.operation {
         GpuProjectionOperation::Copy => unreachable!(),
+        GpuProjectionOperation::Buffer { element, writable } => {
+            let ty = types.name(element);
+            let access = if *writable { 3 } else { 1 };
+            writeln!(out, "    if (({source}).f1 > SIZE_MAX / sizeof({ty})) resin_fail(\"GPU binding length overflow\");").unwrap();
+            // The binding slot has source-layout offsets but a distinct wire encoding:
+            // device address followed by zero padding, never a serialized host owner.
+            // Shader code can only borrow this slot through checked buffer intrinsics.
+            writeln!(out, "    {{ uint64_t address = resin_gpu_projection_buffer({projection}, ({source}).f0, ({source}).f1 * sizeof({ty}), _Alignof({ty}), {access}u);").unwrap();
+            writeln!(out, "      memset(&({destination}).f0, 0, sizeof(({destination}).f0)); memcpy(&({destination}).f0, &address, sizeof(address)); }}").unwrap();
+            writeln!(out, "    ({destination}).f1 = ({source}).f1;").unwrap();
+        }
         GpuProjectionOperation::Pointer { element } => {
             let ty = types.name(element);
             writeln!(out, "    {destination} = ({}) (uintptr_t) resin_gpu_projection_pointer({projection}, ({source}).f0, sizeof({ty}), _Alignof({ty}));", types.name(&plan.target)).unwrap();

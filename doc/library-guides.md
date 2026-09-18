@@ -8,6 +8,7 @@ explain workflows involving several modules:
 - [Shaders and graphics](shaders.md): entry points, pipelines, and device requirements.
 - [Ray tracing pipelines](ray-tracing-pipelines.md): triangle scenes, stages, payloads, and ray launches.
 - [GPU buffers](gpu-buffers.md): ownership, access, uploads, and readback.
+- [Typed resource bindings](resource-bindings.md): resource records and shared storage-using helpers.
 - [Windows and presentation](windowing.md): event handling, input, resize, and images.
 
 For complete rendering projects, see the [tutorials](tutorials.md), including

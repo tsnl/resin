@@ -1,0 +1,76 @@
+// ANCHOR: resource_bindings
+export { main, cpu_main, step };
+import { "$/buffer.resin", "$/gpu.resin", "$/span.resin", "$/shared.resin" };
+
+struct Particle { x: f32, velocity: f32 }
+struct StepBindings {
+	input: Buffer<Particle>,
+	output: BufferMut<Particle>,
+	dt: f32,
+}
+
+// The complete storage-using algorithm is shared. Each target supplies views
+// with length, load, and store operations; generic specialization picks them.
+fn advance<I, O>(input: Ref<I>, output: Ref<O>, index: u64, dt: f32) {
+	if (index < input.length && index < output.length) {
+		let p = input:load(index);
+		output:store(index, Particle { x = p.x + p.velocity * dt, velocity = p.velocity });
+	};
+}
+
+@compute_shader
+fn step(index: u64, resources: Ref<StepBindings>) {
+	advance(resources.input, resources.output, index, resources.dt);
+}
+
+fn cpu_main() -> i32 | Err<_> {
+	let input = arc_span_alloc(5, Particle { x = 2, velocity = 3 })?;
+	let output = arc_span_alloc(5, Particle { x = -7, velocity = 0 })?;
+	let input_view = input:get();
+	let output_view = output:get();
+	let mut index: u64 = 0;
+	while (index < 5) {
+		advance(input_view, output_view, index, f32(3));
+		assert(output_view:at(index).x == f32(11));
+		index = index + 1;
+	};
+	0
+}
+
+fn main() -> i32 | Err<_> {
+	let gpu = gpu_new()?;
+	let input_data = arc_span_alloc(7, Particle { x = 2, velocity = 3 })?;
+	let readback = arc_span_alloc(7, Particle { x = -7, velocity = 0 })?;
+	let input = gpu:alloc::<Particle>(7)?;
+	let output = gpu:alloc::<Particle>(7)?;
+	let initial = input_data:get();
+	let values = readback:get();
+	input:copy_from(initial);
+	output:copy_from(values);
+	// Views retain their allocation and preserve subranges. There is one
+	// resource declaration for both pipeline creation and recording.
+	let input_slice = input:slice(1, 5);
+	let output_slice = output:slice(1, 5);
+	let mut resources = StepBindings {
+		input = input_slice:read_buffer(),
+		output = output_slice:write_buffer(),
+		dt = 3,
+	};
+	let pipeline = gpu:create_compute_pipeline(step)?;
+	let width = gpu:compute_workgroup_size();
+	let groups = u32((input_slice.length + width - u64(1)) / width);
+	let commands = gpu:start_command_recording()?;
+	commands:dispatch(pipeline, resources, groups, 1, 1)?;
+	// Recording snapshots parameters; this changes only the host record.
+	resources.dt = 200;
+	commands:submit()?;
+	output:copy_to(values);
+	assert(values:at(0).x == f32(-7) && values:at(6).x == f32(-7));
+	let mut index: u64 = 1;
+	while (index < 6) {
+		assert(values:at(index).x == f32(11));
+		index = index + 1;
+	};
+	0
+}
+// ANCHOR_END: resource_bindings

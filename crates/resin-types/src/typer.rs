@@ -349,9 +349,16 @@ pub(super) fn validate_shader(
     let (input, root) = match parameters {
         [input] => (input, false),
         [input, Ty::Pointer { .. }] => (input, true),
+        [
+            input,
+            Ty::Reference {
+                mutable: false,
+                referent,
+            },
+        ] if matches!(referent.as_ref(), Ty::Defined { .. } | Ty::Record { .. }) => (input, true),
         _ => {
             return Err(format!(
-                "invalid @{stage}_shader signature: expected one input and an optional Ptr<T> root"
+                "invalid @{stage}_shader signature: expected one input and an optional Ptr<T> root or Ref<Resources> bundle"
             ));
         }
     };
@@ -488,8 +495,17 @@ pub(super) fn pipeline_root(
 }
 
 fn shader_root(parameters: &[Ty]) -> Result<Ty, String> {
-    let Some(Ty::Pointer { pointee }) = parameters.get(1) else {
-        return Err("shader root parameter must be a pointer".into());
+    let Some(
+        Ty::Pointer { pointee }
+        | Ty::Reference {
+            mutable: false,
+            referent: pointee,
+        },
+    ) = parameters.get(1)
+    else {
+        return Err(
+            "shader root parameter must be a pointer or a read-only resource reference".into(),
+        );
     };
     Ok(*pointee.clone())
 }
@@ -575,32 +591,37 @@ pub(super) fn shader_builtin_instance(
 }
 
 pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), String> {
-    let mut pending = vec![ty];
+    shader_type(definitions, ty, false)
+}
+
+fn shader_type(definitions: &[TypeDef], ty: &Ty, addressed: bool) -> Result<(), String> {
+    let mut pending = vec![(ty, addressed)];
     let mut seen = std::collections::BTreeSet::new();
-    while let Some(ty) = pending.pop() {
-        if !seen.insert(ty) {
+    while let Some((ty, addressed)) = pending.pop() {
+        if !seen.insert((ty, addressed)) {
             continue;
         }
         match ty {
             Ty::Unit | Ty::None | Ty::Bool | Ty::Int32 | Ty::UInt8 | Ty::UInt32
             | Ty::UInt64 | Ty::Int64 | Ty::Float32 | Ty::StrongOwner | Ty::WeakOwner => {},
             Ty::Str => return Err("shader string literals need device-backed storage; pass a Span<u8> in the shader root".into()),
+            Ty::GpuView if addressed => {},
             Ty::GpuPipelineContract | Ty::GpuView | Ty::GpuArguments => {
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
-            Ty::Reference { referent, .. } => pending.push(referent),
+            Ty::Reference { referent, .. } => pending.push((referent, true)),
             Ty::Pointer { pointee: element } => {
                 crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
-                pending.push(element);
+                pending.push((element, true));
             }
             Ty::Array { element, length } => {
                 if *length == 0 { return Err("shader arrays must not be empty".into()); }
-                pending.push(element);
+                pending.push((element, addressed));
             }
-            Ty::Record { fields } => pending.extend(fields.iter().map(|field| &field.ty)),
-            Ty::Defined { definition } => pending.push(crate::definition_body(definitions, *definition).map_err(|error| error.to_string())?),
-            Ty::Union { variants } => pending.extend(variants),
-            Ty::Error { payload } => pending.push(payload),
+            Ty::Record { fields } => pending.extend(fields.iter().map(|field| (&field.ty, addressed))),
+            Ty::Defined { definition } => pending.push((crate::definition_body(definitions, *definition).map_err(|error| error.to_string())?, addressed)),
+            Ty::Union { variants } => pending.extend(variants.iter().map(|ty| (ty, addressed))),
+            Ty::Error { payload } => pending.push((payload, addressed)),
             _ => return Err(format!("shader profile does not support type {ty:?}")),
         }
     }
@@ -636,4 +657,8 @@ pub(super) fn ray_payload(definitions: &[TypeDef], ty: &Ty) -> Result<(), String
             "ray payloads require f32/i32/u32 values, arrays, or records of those values".into(),
         ),
     }
+}
+
+pub(super) fn shader_address_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), String> {
+    shader_type(definitions, ty, true)
 }

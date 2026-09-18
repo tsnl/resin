@@ -68,6 +68,14 @@ fn check_shader(
         .locals
         .get(..function.parameter_count)
         .ok_or_else(|| location.error(VerifyErrorKind::InvalidLocal { local: 0 }))?;
+    if let Some(Ty::Reference {
+        mutable: false,
+        referent,
+    }) = parameters.get(1).map(|p| &p.ty)
+    {
+        resin_types::gpu_projection_plan(&module.types, referent, referent)
+            .map_err(|_| location.error(VerifyErrorKind::InvalidShader))?;
+    }
     resin_types::shader::validate(
         typer,
         &parameters

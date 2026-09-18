@@ -25,6 +25,7 @@
   - [Strings and console I/O](strings.md)
   - [PNG images](images.md)
   - [Shaders and graphics](shaders.md)
+  - [Typed resource bindings](resource-bindings.md)
   - [Ray tracing pipelines](ray-tracing-pipelines.md)
   - [GPU buffers](gpu-buffers.md)
   - [Windows and presentation](windowing.md)

@@ -445,7 +445,9 @@ fn instruction(
         Instr::TraceRay { .. } | Instr::RayHitInfo => {
             return Err(Error::unsupported("ray operations require a shader".into()));
         }
-        Instr::GpuViewAllocate
+        Instr::GpuBufferLoad { .. }
+        | Instr::GpuBufferStore
+        | Instr::GpuViewAllocate
         | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict

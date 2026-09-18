@@ -14,6 +14,9 @@ pub(super) fn instruction(
     out: &mut String,
 ) -> Result<String, Error> {
     match instr {
+        Instr::GpuBufferLoad { .. } | Instr::GpuBufferStore => {
+            buffer_access(types, name, instr, args, out)
+        }
         Instr::GpuViewAllocate => native(types, name, args, result, out),
         Instr::GpuViewRange { element } => {
             writeln!(
@@ -171,4 +174,52 @@ fn checked_bytes(
     )
     .unwrap();
     bytes
+}
+
+fn buffer_access(
+    types: &Types<'_>,
+    name: &str,
+    instr: &Instr,
+    args: &[Slot],
+    out: &mut String,
+) -> Result<String, Error> {
+    let Ty::Reference { referent, .. } = &args[0].ty else {
+        unreachable!("verified binding reference");
+    };
+    let (element, _) =
+        resin_types::gpu_buffer_binding(&types.module.types, referent).expect("verified binding");
+    let element_name = types.name(element);
+    let buffer = format!("({})->value", args[0].expr);
+    let index = &args[1].expr;
+    let write = matches!(instr, Instr::GpuBufferStore);
+    if !write {
+        writeln!(out, "  {element_name} {name}_value = {{0}};").unwrap();
+    }
+    writeln!(out, "  if ({index} < {buffer}.f1) {{").unwrap();
+    writeln!(out, "    if ({index} > SIZE_MAX / sizeof({element_name})) resin_fail(\"GPU binding index overflow\");").unwrap();
+    writeln!(out, "    ResinGpuPtr {name}_view = resin_gpu_ptr_offset({buffer}.f0, {index} * sizeof({element_name}), sizeof({element_name}), _Alignof({element_name}));").unwrap();
+    let access = if write { 2 } else { 1 };
+    let address = format!(
+        "resin_gpu_ptr_host({name}_view, sizeof({element_name}), _Alignof({element_name}), {access}u)"
+    );
+    if write {
+        writeln!(out, "    *({element_name} *){address} = {};", args[2].expr).unwrap();
+    } else {
+        writeln!(
+            out,
+            "    memcpy(&{name}_value, {address}, sizeof({element_name}));"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "    resin_arc_release({name}_view.owner);
+  }}"
+    )
+    .unwrap();
+    Ok(if write {
+        "0".into()
+    } else {
+        format!("{name}_value")
+    })
 }

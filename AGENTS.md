@@ -222,6 +222,15 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
 
 ## Development Practices
 
+- `$/buffer.resin` provides explicitly registered `Buffer<T>` and `BufferMut<T>`
+  views. Shader resource records are borrowed through `Ref<Resources>` and recorded
+  with the same nominal type. Bindings are host-owned values and shader-borrowed
+  capabilities, not buffer elements. Validate the whole resource schema during
+  LIR construction and verification, even for unused fields. Shader buffer loads
+  return zero out of range; stores do nothing. Preserve allocation retention,
+  permissions, subranges, and recording snapshots. The initial Vulkan lowering
+  uses bounded device-address encoding; descriptor lowering remains separate.
+
 - Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
   Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the
   runtime's Vulkan features; MoltenVK discovery does not imply full GPU compatibility.

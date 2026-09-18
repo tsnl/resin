@@ -107,6 +107,10 @@ impl Function {
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instr {
+    /// Borrow a registered resource binding; out-of-range reads are zero.
+    GpuBufferLoad { element: Ty },
+    /// Out-of-range writes are ignored. Read-only bindings cannot use this instruction.
+    GpuBufferStore,
     /// `[native_gpu, strong_owner, bytes, alignment, memory] -> [{value: GpuView | None, status: int}]`.
     /// Allocation retains the device owner. All operands are consumed.
     GpuViewAllocate,

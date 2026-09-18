@@ -230,6 +230,22 @@ pub unsafe extern "C" fn resin_gpu_projection_pointer(
     unsafe { gpu_view::projection_pointer(projection, value, bytes, alignment) }
 }
 
+/// Encode and retain an explicitly qualified buffer binding.
+///
+/// # Safety
+/// As for `resin_gpu_projection_pointer`: the projection is exclusively held
+/// during construction and the view is live. Access is read (1) or read/write (3).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_projection_buffer(
+    projection: *mut ResinArc,
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    access: u32,
+) -> ResinDeviceAddress {
+    unsafe { gpu_view::projection_buffer(projection, value, bytes, alignment, access) }
+}
+
 /// Record a projected dispatch. Success retains the projection and prevents
 /// CPU accesses to its allocations until completion or cancellation.
 ///

@@ -178,7 +178,8 @@ impl FunctionLowering<'_> {
                     "math intrinsic reached storage lowering without specialization",
                 ));
             }
-            Intrinsic::GpuPointerProjection
+            Intrinsic::GpuBufferType
+            | Intrinsic::GpuPointerProjection
             | Intrinsic::GpuSequenceProjection
             | Intrinsic::GpuPipelineType => {
                 return Err(LowerError::invalid_hir(
@@ -186,6 +187,10 @@ impl FunctionLowering<'_> {
                     "GPU projection contract reached storage lowering",
                 ));
             }
+            Intrinsic::GpuBufferLoad => self.emit(Instr::GpuBufferLoad {
+                element: result.clone(),
+            }),
+            Intrinsic::GpuBufferStore => self.emit(Instr::GpuBufferStore),
             Intrinsic::GpuViewLoad => self.emit(Instr::GpuViewLoad {
                 element: result.clone(),
             }),

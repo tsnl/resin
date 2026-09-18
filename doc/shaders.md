@@ -1,5 +1,9 @@
 # Shaders and graphics
 
+Shaders can borrow a [typed resource record](resource-bindings.md) through
+`Ref<Resources>` instead of receiving a projected `Ptr<T>` root. The record contains
+explicit read-only or writable buffer bindings and plain value parameters.
+
 Run either demo like any other Resin program:
 
 ```sh
@@ -69,6 +73,10 @@ fn kernel(index: u64, root: Ptr<Params>) -> ()  {
 }
 ```
 The entry interfaces are:
+
+Where an entry accepts `Ptr<T>` below, it may instead take `Ref<Resources>` for a
+[typed resource record](resource-bindings.md). Constants and explicit buffer
+bindings then use the same record declaration on the host and device.
 
 - Compute takes `(u64, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
   to get the `u64` number of invocations per workgroup for that `Gpu`. The runtime

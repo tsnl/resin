@@ -195,8 +195,12 @@ impl Specialization<'_, '_> {
                 if access == Access::Value && ty.needs_drop(self.instances.typer().definitions()) {
                     return Err(self.profile_error("shader cannot consume managed values: reference counting and destruction are host-only".into()));
                 }
-                crate::profile::expression_type(self.instances.typer(), &ty)
-                    .map_err(|message| self.profile_error(message))?;
+                if access == Access::Place {
+                    resin_types::shader::address_type(self.instances.typer().definitions(), &ty)
+                } else {
+                    crate::profile::expression_type(self.instances.typer(), &ty)
+                }
+                .map_err(|message| self.profile_error(message))?;
             }
             Ok(concrete::Term {
                 span: source.span,
@@ -992,7 +996,8 @@ impl Specialization<'_, '_> {
     ) -> Result<concrete::TermKind, Error> {
         if matches!(
             op,
-            Intrinsic::GpuPointerProjection
+            Intrinsic::GpuBufferType
+                | Intrinsic::GpuPointerProjection
                 | Intrinsic::GpuSequenceProjection
                 | Intrinsic::GpuPipelineType
         ) {
@@ -1016,7 +1021,9 @@ impl Specialization<'_, '_> {
         }
         if matches!(
             op,
-            Intrinsic::GpuViewRange
+            Intrinsic::GpuBufferLoad
+                | Intrinsic::GpuBufferStore
+                | Intrinsic::GpuViewRange
                 | Intrinsic::GpuViewLoad
                 | Intrinsic::GpuViewStore
                 | Intrinsic::GpuViewReplace

@@ -128,6 +128,8 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
         Instr::GpuViewLoad { element } => list("gpu-view-load", vec![sexp_ty(names, element)]),
+        Instr::GpuBufferLoad { element } => list("gpu-buffer-load", vec![sexp_ty(names, element)]),
+        Instr::GpuBufferStore => symbol("gpu-buffer-store"),
         Instr::GpuViewAllocate => symbol("gpu-view-allocate"),
         Instr::GpuViewRange { element } => list("gpu-view-range", vec![sexp_ty(names, element)]),
         Instr::GpuViewOffset => symbol("gpu-view-offset"),

@@ -280,20 +280,41 @@ pub(crate) unsafe fn projection_root(projection: *mut ResinArc) -> *mut c_void {
     }
 }
 
+#[cfg(test)]
 unsafe fn checked_device_pointer(
     value: ResinGpuPtr,
     bytes: usize,
     alignment: usize,
     gpu: *mut ResinGpu,
 ) -> Result<u64, &'static str> {
+    unsafe {
+        checked_device_access(
+            value,
+            bytes,
+            alignment,
+            gpu,
+            RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE,
+        )
+    }
+}
+
+unsafe fn checked_device_access(
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    gpu: *mut ResinGpu,
+    access: u32,
+) -> Result<u64, &'static str> {
     let owner = unsafe { allocation_owner(value) }?;
     if owner.gpu != gpu {
         return Err("GPU pointer belongs to a different device");
     }
     check_range(value.offset, bytes, owner.bytes)?;
-    // Ordinary shader Ptr permits both reads and writes. Narrowed host views
-    // cannot be projected until shader access qualifiers exist.
-    check_access(value.access, RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE)?;
+    if access != RESIN_GPU_ACCESS_READ && access != (RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE)
+    {
+        return Err("invalid shader binding access");
+    }
+    check_access(value.access, access)?;
     let address = owner
         .allocation
         .device_pointer()
@@ -309,8 +330,26 @@ unsafe fn checked_projection_pointer(
     bytes: usize,
     alignment: usize,
 ) -> Result<u64, &'static str> {
+    unsafe {
+        checked_projection_binding(
+            projection,
+            value,
+            bytes,
+            alignment,
+            RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE,
+        )
+    }
+}
+
+unsafe fn checked_projection_binding(
+    projection: &mut ProjectionOwner,
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    access: u32,
+) -> Result<u64, &'static str> {
     let gpu = unsafe { allocation_owner(projection.root) }?.gpu;
-    let address = unsafe { checked_device_pointer(value, bytes, alignment, gpu) }?;
+    let address = unsafe { checked_device_access(value, bytes, alignment, gpu, access) }?;
     if value.owner != projection.root.owner && !projection.dependencies.contains(&value.owner) {
         unsafe { resin_arc_retain(value.owner) };
         projection.dependencies.push(value.owner);
@@ -442,6 +481,25 @@ pub(crate) unsafe fn copy_image_to_span(
         GpuUse::new(destination.data.owner, vec![destination.data.owner])
     });
     ResinStatus::Success
+}
+
+pub(crate) unsafe fn projection_buffer(
+    projection: *mut ResinArc,
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    access: u32,
+) -> u64 {
+    unsafe {
+        checked_projection_binding(
+            projection_owner(projection),
+            value,
+            bytes,
+            alignment,
+            access,
+        )
+    }
+    .unwrap_or_else(|message| crate::host::fail(message))
 }
 
 #[cfg(test)]
@@ -748,6 +806,26 @@ void main() { Value(Root(root).destination).number += 1; }
             assert!(checked_device_pointer(value, 8, 8, ptr::null_mut()).is_err());
             assert!(payload.dependencies.is_empty());
             assert!(checked_host(value, 8, 8, RESIN_GPU_ACCESS_READ).is_ok());
+            let readonly = ResinGpuPtr {
+                access: RESIN_GPU_ACCESS_READ,
+                ..value
+            };
+            assert!(
+                checked_projection_binding(payload, readonly, 16, 8, RESIN_GPU_ACCESS_READ).is_ok()
+            );
+            assert_eq!(payload.dependencies.len(), 1);
+            assert!(
+                checked_projection_binding(
+                    payload,
+                    readonly,
+                    16,
+                    8,
+                    RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE
+                )
+                .is_err()
+            );
+            assert!(checked_projection_binding(payload, value, 16, 8, 0).is_err());
+            assert_eq!(payload.dependencies.len(), 1);
             resin_arc_release(projection);
             resin_arc_release(root.owner);
             resin_arc_release(value.owner);

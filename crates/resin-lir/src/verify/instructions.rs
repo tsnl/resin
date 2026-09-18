@@ -56,7 +56,9 @@ pub(super) fn check_instr(
             super::pipeline::check(module, instr, stack, location)?;
         }
 
-        Instr::GpuViewAllocate
+        Instr::GpuBufferLoad { .. }
+        | Instr::GpuBufferStore
+        | Instr::GpuViewAllocate
         | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict

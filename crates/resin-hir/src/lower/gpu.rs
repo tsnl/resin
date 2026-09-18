@@ -298,13 +298,23 @@ impl Context {
             let Type::Function { params, .. } = shader else {
                 return Err("pipeline creation requires decorated shader declarations".into());
             };
-            if let Some(Type::Pointer { pointee }) = params.get(1) {
+            if let Some(
+                Type::Pointer { pointee }
+                | Type::Reference {
+                    mutable: false,
+                    referent: pointee,
+                },
+            ) = params.get(1)
+            {
                 if root != Type::None && root != **pointee {
                     return Err("pipeline shaders must use the same root type".into());
                 }
                 root = *pointee.clone();
             } else if kind != resin_types::GpuPipelineKind::Graphics {
-                return Err("shader root parameter must be a pointer".into());
+                return Err(
+                    "shader root parameter must be a pointer or a read-only resource reference"
+                        .into(),
+                );
             }
         }
         if kind == resin_types::GpuPipelineKind::RayTracing {
@@ -458,6 +468,9 @@ impl Context {
         if depth >= 128 {
             return Err("GPU projection type exceeds the depth limit".into());
         }
+        if self.contains_buffer_binding(target, depth) {
+            return Ok(target.clone());
+        }
         if let Some(projection) = self.registered_projection(target)? {
             return Ok(projection);
         }
@@ -489,6 +502,33 @@ impl Context {
         }
     }
 
+    fn contains_buffer_binding(&self, ty: &crate::Type, depth: usize) -> bool {
+        if depth >= 128 {
+            return false;
+        }
+        match ty {
+            crate::Type::Defined { definition, .. } => {
+                if self
+                    .nominal_schemes
+                    .get(definition)
+                    .and_then(|s| s.gpu_projection.as_ref())
+                    .is_some_and(|p| {
+                        matches!(p.kind, resin_types::GpuProjectionKind::Buffer { .. })
+                    })
+                {
+                    return true;
+                }
+                super::gpu_projections::body(self, ty)
+                    .is_some_and(|body| self.contains_buffer_binding(&body, depth + 1))
+            }
+            crate::Type::Record { fields } => fields
+                .iter()
+                .any(|f| self.contains_buffer_binding(&f.ty, depth + 1)),
+            crate::Type::Array { element, .. } => self.contains_buffer_binding(element, depth + 1),
+            _ => false,
+        }
+    }
+
     fn registered_projection(&self, target: &crate::Type) -> Result<Option<crate::Type>, String> {
         use crate::Type;
         let mut candidates = Vec::new();
@@ -496,6 +536,12 @@ impl Context {
             let Some(projection) = &source.gpu_projection else {
                 continue;
             };
+            if matches!(
+                projection.kind,
+                resin_types::GpuProjectionKind::Buffer { .. }
+            ) {
+                continue;
+            }
             let element = match (&projection.target, target) {
                 (Type::Pointer { .. }, Type::Pointer { pointee }) => Some(*pointee.clone()),
                 (

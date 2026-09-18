@@ -14,6 +14,29 @@ pub(super) fn check(
     let args = pop(stack, super::stack_effect(instr).pops, location)?;
     let invalid = || location.error(VerifyErrorKind::InvalidGpuOperation);
     let result = match instr {
+        Instr::GpuBufferLoad { .. } | Instr::GpuBufferStore => {
+            let Ty::Reference {
+                mutable: false,
+                referent,
+            } = &args[0]
+            else {
+                return Err(invalid());
+            };
+            let (element, writable) =
+                resin_types::gpu_buffer_binding(&module.types, referent).map_err(|_| invalid())?;
+            expect_type(Ty::UInt64, args[1].clone(), location)?;
+            if let Instr::GpuBufferLoad { element: expected } = instr {
+                expect_type(element.clone(), expected.clone(), location)?;
+                element.clone()
+            } else {
+                if !writable {
+                    return Err(invalid());
+                }
+                expect_type(element.clone(), args[2].clone(), location)?;
+                Ty::Unit
+            }
+        }
+
         Instr::GpuViewAllocate => {
             if !matches!(&args[0], Ty::Pointer { .. }) || !matches!(&args[1], Ty::StrongOwner) {
                 return Err(invalid());

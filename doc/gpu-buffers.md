@@ -1,5 +1,9 @@
 # GPU pointers, spans, and shader arguments
 
+For a single resource declaration shared by pipeline creation and recording, use
+[typed resource bindings](resource-bindings.md). This chapter also describes the
+allocation APIs and the existing pointer-root interface, which remain supported.
+
 `GpuPtr<T>` owns a view into a GPU allocation. `GpuSpan<T>` adds an element count.
 Value copies, explicit clones, indexed pointers, and slices retain the allocation and its GPU. Both are
 ordinary generic source structs over an opaque `GpuView` primitive. Neither

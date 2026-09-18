@@ -1,6 +1,6 @@
 # Proposal: explicit GPU resource bindings
 
-**Status:** Draft design decision; not implemented.
+**Status:** Direction adopted; initial typed-buffer implementation available.
 
 **Date:** 2026-09-17.
 
@@ -13,8 +13,12 @@ interchangeable CPU/GPU pointers. The motivation is predictable boundary costs,
 portability, and simpler resource semantics. Exact syntax and implementation
 mechanisms remain open.
 
-This is a documentation-only proposal. The current contracts in
-[GPU buffers](gpu-buffers.md) and [Shaders and graphics](shaders.md) remain unchanged.
+The [typed resource bindings guide](resource-bindings.md) documents the implemented
+API and its executable CPU/GPU example. It supplies read-only and writable buffer
+views, one borrowed resource record, bounds behavior, and recording guarantees.
+The initial lowering uses Vulkan device addresses; descriptor-based lowering and
+the broader resource kinds described below remain future work. Names and syntax
+in the design pseudocode below are illustrative; use the guide for current APIs.
 
 ## Decision
 

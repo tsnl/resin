@@ -735,6 +735,25 @@ impl<'a> Instances<'a> {
                 error.applications = self.trace(Some(id));
                 error
             })?;
+        if self.shaders.contains_key(&id)
+            && lowered.function.parameter_count > 1
+            && let Some(Ty::Reference {
+                mutable: false,
+                referent,
+            }) = lowered.function.locals.get(1).map(|p| &p.ty)
+        {
+            resin_types::gpu_projection_plan(self.typer.definitions(), referent, referent)
+                .map_err(|message| {
+                    self.error(
+                        ErrorKind::UnsupportedProfile {
+                            profile: Profile::Shader,
+                            message: message.into(),
+                        },
+                        Some(id),
+                        lowered.location.clone(),
+                    )
+                })?;
+        }
         crate::profile::function(&self.typer, id, &lowered.function).map_err(|error| {
             let location = error
                 .instruction
