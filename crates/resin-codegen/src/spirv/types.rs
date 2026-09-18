@@ -202,9 +202,9 @@ impl Context<'_> {
     }
 
     pub(super) fn physical_load(&mut self, pointee: &Ty, address: Word) -> Result<Word, Error> {
-        if self.resources.is_some() {
+        if !self.physical_addresses {
             return Err(Error::unsupported(
-                "resource shaders cannot dereference physical device pointers".into(),
+                "shader requires a pointer-root interface to dereference device pointers".into(),
             ));
         }
         let layout = crate::layout::layout(self.module, pointee)?;
@@ -236,9 +236,9 @@ impl Context<'_> {
         address: Word,
         value: Word,
     ) -> Result<(), Error> {
-        if self.resources.is_some() {
+        if !self.physical_addresses {
             return Err(Error::unsupported(
-                "resource shaders cannot dereference physical device pointers".into(),
+                "shader requires a pointer-root interface to dereference device pointers".into(),
             ));
         }
         let layout = crate::layout::layout(self.module, pointee)?;

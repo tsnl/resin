@@ -100,6 +100,37 @@ fn descriptors_execute_without_buffer_device_addresses() {
         gpu.free(&output);
         gpu.free(&input);
     }
+    // A stage without a resource argument must not force the whole graphics
+    // pipeline back onto the physical-address profile.
+    let source = GRAPHICS
+        .replace(
+            "fn vertex(index: i32, resources: Ref<Resources>)",
+            "fn vertex(index: i32)",
+        )
+        .replace("resources.scale", "f32(1)")
+        .replace(
+            "color = resources.nested.colors:load(0)",
+            "color = Color { r = 1, g = 0, b = 0, a = 1 }",
+        );
+    let module = support::module(&source);
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project
+        .build(&support::toolchain::spirv(&optimizer))
+        .unwrap();
+    let shader_bytes = |stage| {
+        let shader = project
+            .generated
+            .shaders()
+            .iter()
+            .find(|s| s.stage() == stage)
+            .unwrap();
+        let bytes = std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
+        assert!(support::shaders::instructions(&bytes, 14).all(|args| args[0] == 0));
+        bytes
+    };
+    let vertex = shader_bytes(resin_types::Stage::Vertex);
+    let fragment = shader_bytes(resin_types::Stage::Fragment);
+    drop(unsafe { gpu.create_graphics_pipeline(&vertex, &fragment) }.unwrap());
     let module = support::module(
         "export { kernel }; @compute_shader fn kernel(i: u64, p: Ptr<u32>) { p.* = u32(i); }",
     );

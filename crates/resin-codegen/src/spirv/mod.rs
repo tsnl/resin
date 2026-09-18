@@ -24,21 +24,20 @@ pub(super) fn generate(
     let reachable = checked
         .shader_functions(entry)
         .ok_or_else(|| Error::unsupported("shader entry was not requested".into()))?;
-    let resource_root = module.functions[entry.index()].locals
-        [..module.functions[entry.index()].parameter_count]
-        .get(1)
-        .and_then(|p| match &p.ty {
-            Ty::Reference {
-                mutable: false,
-                referent,
-            } => Some(referent.as_ref()),
-            _ => None,
-        });
+    let function = &module.functions[entry.index()];
+    let parameters = &function.locals[..function.parameter_count];
+    let resource_root = parameters.get(1).and_then(|p| match &p.ty {
+        Ty::Reference {
+            mutable: false,
+            referent,
+        } => Some(referent.as_ref()),
+        _ => None,
+    });
     let mut context = Context::new(
         module,
         &analysis.types,
         &analysis.functions,
-        resource_root.is_some(),
+        matches!(parameters.get(1).map(|p| &p.ty), Some(Ty::Pointer { .. })),
     );
     if let Some(root) = resource_root {
         buffers::declare(&mut context, root)?;
@@ -50,7 +49,7 @@ pub(super) fn generate(
     }
     for &function in reachable {
         let index = function.index();
-        if context.resources.is_some()
+        if !context.physical_addresses
             && module.functions[index].locals[..module.functions[index].parameter_count]
                 .iter()
                 .any(|p| matches!(p.ty, Ty::Reference { .. }))
@@ -92,6 +91,7 @@ pub(super) fn generate(
 /// All IDs and types belong to one shader module. Local borrows retain their
 /// root and projection path; ordinary pointer values are u64 device addresses.
 struct Context<'a> {
+    physical_addresses: bool,
     resources: Option<buffers::Resources>,
     ray: Option<ray::Interface>,
     builder: Builder,
@@ -117,20 +117,20 @@ impl<'a> Context<'a> {
         module: &'a resin_lir::Module,
         table: &'a TypeTable,
         analysis: &'a [resin_lir::FunctionTypes],
-        descriptors: bool,
+        physical_addresses: bool,
     ) -> Self {
         let mut builder = Builder::new();
         builder.set_version(1, 6);
         builder.capability(Capability::Shader);
         builder.capability(Capability::Int64);
-        if !descriptors {
+        if physical_addresses {
             builder.capability(Capability::PhysicalStorageBufferAddresses);
         }
         builder.memory_model(
-            if descriptors {
-                AddressingModel::Logical
-            } else {
+            if physical_addresses {
                 AddressingModel::PhysicalStorageBuffer64
+            } else {
+                AddressingModel::Logical
             },
             MemoryModel::GLSL450,
         );
@@ -142,6 +142,7 @@ impl<'a> Context<'a> {
         builder.name(failed, "failed");
         let functions = module.functions.iter().map(|_| builder.id()).collect();
         Self {
+            physical_addresses,
             resources: None,
             ray: None,
             builder,

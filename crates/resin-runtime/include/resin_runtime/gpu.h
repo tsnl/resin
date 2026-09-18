@@ -97,7 +97,7 @@ uint32_t resin_gpu_compute_workgroup_size(const ResinGpu *gpu);
    width. Raw shaders with a fixed local size keep their declared dimensions. */
 #define RESIN_COMPUTE_WORKGROUP_SIZE_SPEC_ID 0
 
-/* `alignment` applies to the device address; 0 means 16. */
+/* `alignment` applies to the buffer byte offset (and optional device address); 0 means 16. */
 ResinStatus resin_gpu_malloc(
     ResinGpu *gpu,
     size_t bytes,
@@ -191,7 +191,8 @@ ResinStatus resin_gpu_set_pipeline(
     ResinCommandBuffer *command_buffer,
     const ResinPipeline *pipeline);
 
-/* `root_data` is supplied as one 64-bit push constant. */
+/* `root_data` is one 64-bit push constant: a constants-buffer byte offset for
+   descriptor shaders, or a device address for legacy pointer-root shaders. */
 ResinStatus resin_gpu_dispatch(
     ResinCommandBuffer *command_buffer,
     ResinDeviceAddress root_data,

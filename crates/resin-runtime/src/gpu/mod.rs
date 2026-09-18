@@ -957,7 +957,9 @@ impl ResinCommandBuffer {
     }
 
     /// # Safety
-    /// The root address and every shader-accessed address must be valid for the bound shaders. All resources must remain live through completion.
+    /// `root_data` is a constants-buffer byte offset for descriptor shaders, or a
+    /// device address for legacy shaders. All bound descriptors and shader-accessed
+    /// resources must be valid, synchronized, and live through completion.
     pub unsafe fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
         self.validate_draw(vertex_count)?;
         self.push_root(root_data);
@@ -1040,7 +1042,10 @@ impl ResinCommandBuffer {
     }
 
     /// # Safety
-    /// The workgroup counts must satisfy device limits. The root address and every shader-accessed address must be valid, synchronized, and live through completion.
+    /// The workgroup counts must satisfy device limits. `root_data` is a constants-buffer
+    /// byte offset for descriptor shaders, or a device address for legacy shaders. All
+    /// bound descriptors and shader-accessed resources must be valid, synchronized,
+    /// and live through completion.
     pub unsafe fn dispatch(
         &mut self,
         root_data: u64,

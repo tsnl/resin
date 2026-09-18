@@ -71,7 +71,8 @@ Compute, vertex, and fragment entries with `Ref<Resources>` use logical SPIR-V
 addressing and Vulkan storage-buffer descriptors. They require no buffer device
 addresses. The compiler assigns buffer bindings in declaration order, recursively
 through nested records; pipeline creation derives the descriptor layout from the
-compiled shaders. All rooted graphics stages must use the same resource type.
+compiled shaders. All rooted graphics stages must use the same resource type. A stage without a
+resource argument also uses logical addressing and can share such a pipeline.
 
 Descriptor set zero contains a separate read-only constants/metadata buffer at
 binding zero, followed by the declared buffers. Recording snapshots plain values
