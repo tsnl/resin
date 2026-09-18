@@ -8,7 +8,6 @@ extern {
 	},
 	"resin_runtime.h": {
 		fn resin_string_array_length(values: Ptr<Ptr<u8>>) -> u64;
-		fn resin_environment_get(envp: Ptr<Ptr<u8>>, name: Ptr<u8>) -> Ptr<u8>;
 	},
 };
 
@@ -25,7 +24,8 @@ fn environment(envp: Ptr<Ptr<u8>>) -> Span<Ptr<u8>> {
 	Span<Ptr<u8>> { data = envp, length = resin_string_array_length(envp) }
 }
 
-// NUL-terminated strings become length-delimited views without copying.
+/// Adapt a valid, NUL-terminated native string to a bounded view without copying.
+/// Ordinary Resin text APIs should accept the resulting Span instead of a pointer.
 fn c_string(text: Ptr<u8>) -> Span<u8> {
 	Span<u8> { data = text, length = strlen(text) }
 }
@@ -34,13 +34,30 @@ fn argument(args: Ref<Span<Ptr<u8>>>, index: u64) -> Span<u8> {
 	c_string(args:at(index))
 }
 
-// Exact case-sensitive name lookup in the frozen snapshot, including on Windows.
-// A present empty value succeeds with length zero; absence is a distinct error.
-fn environment_get(envp: Ptr<Ptr<u8>>, name: Ptr<u8>) -> (Span<u8> | Err<EnvironmentVariableNotFound>) {
-	let mut value = resin_environment_get(envp, name);
-	if (u64(value) == u64(0)) {
-		Err(EnvironmentVariableNotFound {})
-	} else {
-		(c_string(value))
-	}
+/// Look up a bounded name in the borrowed environment snapshot.
+/// A present empty value succeeds with length zero; absence is a distinct error.
+fn environment_get(env: Ref<Span<Ptr<u8>>>, name: Span<u8>) -> Span<u8> | Err<EnvironmentVariableNotFound> {
+	let mut index: u64 = 0;
+	while (index < env.length) {
+		let entry = c_string(env:at(index));
+		if (environment_name_matches(entry, name)) {
+			return entry:slice(name.length + 1, entry.length - name.length - 1);
+		};
+		index = index + 1;
+	};
+	Err(EnvironmentVariableNotFound {})
+}
+
+fn environment_name_matches(entry: Ref<Span<u8>>, name: Ref<Span<u8>>) -> bool {
+	if (name.length == 0 || entry.length <= name.length || entry:at(name.length) != u8(61)) {
+		return false;
+	};
+	let mut index: u64 = 0;
+	while (index < name.length) {
+		if (name:at(index) == u8(61) || name:at(index) != entry:at(index)) {
+			return false;
+		};
+		index = index + 1;
+	};
+	true
 }

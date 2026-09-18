@@ -453,8 +453,12 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   generic arguments. Shader-local references can cross helper calls using Function
   storage pointers plus projection paths; returning or merging distinct local
   references remains unsupported.
-  Spans have `data` and `length` fields. Pointer arithmetic
-  is forbidden; explicit pointer/`u64` casts permit low-level byte arithmetic on the host.
+  Spans have `data` and `length` fields. Use `Span`/`SpanMut` for sequences in source
+  APIs and application records; preserve lengths instead of passing naked pointers.
+  Keep pointer/count and NUL-terminated forms at explicit native/compiler boundaries.
+  Single-value `GpuPtr` views do not provide slicing; slice the originating `GpuSpan`.
+  Direct pointer arithmetic is forbidden; use span indexing and `:lea(index)`.
+  Explicit pointer/`u64` casts remain available for low-level host interop.
   Shader pointer casts (including pointer reinterpretation) are rejected during LIR construction
   and verification; use typed pointers and indexing. The current Vulkan C ABI retains
   pointer/length pairs; language-facing pipeline creation accepts shader declarations.

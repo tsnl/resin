@@ -8,7 +8,7 @@ extern {
 	},
 };
 
-import { "internal/status_codes.resin" };
+import { "internal/status_codes.resin", "span.resin", "process.resin" };
 
 struct InvalidArgument {}
 struct VulkanUnavailable {}
@@ -88,6 +88,7 @@ fn runtime_status_code(error: RuntimeError) -> i32 {
 	}
 }
 
-fn runtime_status_message(error: RuntimeError) -> Ptr<u8> {
-	resin_status_string(runtime_status_code(error))
+/// Borrow the bounded text of a native status message.
+fn runtime_status_message(error: RuntimeError) -> Span<u8> {
+	c_string(resin_status_string(runtime_status_code(error)))
 }

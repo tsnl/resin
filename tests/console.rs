@@ -68,7 +68,7 @@ impl Program {
 fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
     let program = Program::new(
         r#"export { main };
-        import { "$/stdio.resin", "$/string.resin" };
+        import { "$/stdio.resin", "$/string.resin", "$/span.resin" };
         fn failed(error: InputError) -> (() | Err<InputError>)  { Err(error) }
         fn main() -> (() | Err<_>)  {
             let mut reading = 1 == 1;
@@ -76,7 +76,9 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                 match (console_read_line()) {
                     InputLine(line) => {
 
-                        if (PtrMut<u8>(u64(line:get().data) + line:get().length).* != u8(0)) {
+                        let view = line:get();
+                        let terminated = Span<u8> { data = view.data, length = view.length + 1 };
+                        if (terminated:lea(view.length).* != u8(0)) {
                             print("missing terminator");
                         } else {};
                         { let borrowed = fmt("[{0}:", (line:get().length,)); print(borrowed) };

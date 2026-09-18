@@ -197,8 +197,8 @@ fn main() -> i32 | Err<_> {
 
 	// Map completed pixels for PNG I/O. The borrowed span stays valid while pixels
 	// is alive. Four channels and zero stride mean packed RGBA.
-	let bytes = pixels:map()?;
-	image_data_write_pixels("ray-tracing.png".data, width, height, 4, bytes:read_only(), 0)?;
+	let pixel_bytes = pixels:map()?;
+	image_data_write_pixels(bytes("ray-tracing.png"), width, height, 4, pixel_bytes:read_only(), 0)?;
 	print("wrote ray-tracing.png\n");
 	0
 }

@@ -10,7 +10,7 @@ extern {
 	},
 };
 
-import { "span.resin", "status.resin", "shared.resin" };
+import { "span.resin", "status.resin", "shared.resin", "string.resin" };
 
 struct ImageDataOwner {
 	width: u32,
@@ -44,7 +44,9 @@ fn pixels(self: Ref<ImageData>) -> SpanMut<u8> {
 	SpanMut<u8> { data = data.pixels, length = u64(data.width) * u64(data.height) * u64(data.channels) }
 }
 
-fn image_data_read_png(path: Ptr<u8>, channels: u32) -> (ImageData | Err<RuntimeError>) {
+/// Read a bounded path; NUL termination is handled at the native boundary.
+fn image_data_read_png(path: Span<u8>, channels: u32) -> (ImageData | Err<RuntimeError>) {
+	let terminated = path_string(path)?;
 	let mut owner = arc_ptr_alloc::<ImageDataOwner>(
 		ImageDataOwner {
 			width = u32(0),
@@ -54,11 +56,12 @@ fn image_data_read_png(path: Ptr<u8>, channels: u32) -> (ImageData | Err<Runtime
 		}
 	)?;
 	let mut data = owner:get();
-	runtime_status_from_code(resin_image_read_png(path, channels, &data.width, &data.height, &data.channels, &data.pixels))?;
+	runtime_status_from_code(resin_image_read_png(terminated:get().data, channels, &data.width, &data.height, &data.channels, &data.pixels))?;
 	(ImageData { owner = owner })
 }
 
-fn image_data_write_pixels(path: Ptr<u8>, width: u32, height: u32, channels: u32, pixels: Span<u8>, stride: u64) -> (() | Err<RuntimeError>) {
+/// Write bounded path and pixel views; embedded NULs in paths are rejected.
+fn image_data_write_pixels(path: Span<u8>, width: u32, height: u32, channels: u32, pixels: Span<u8>, stride: u64) -> (() | Err<RuntimeError>) {
 	if (width == u32(0) || height == u32(0) || channels == u32(0) || channels > u32(4)) {
 		return Err(InvalidArgument {});
 	};
@@ -73,14 +76,29 @@ fn image_data_write_pixels(path: Ptr<u8>, width: u32, height: u32, channels: u32
 	if (row_stride < row_bytes || pixels.length < row_bytes || u64(height - u32(1)) > (pixels.length - row_bytes) / row_stride) {
 		Err(InvalidArgument {})
 	} else {
-		runtime_status_from_code(resin_image_write_png(path, width, height, channels, pixels.data, row_stride))
+		let terminated = path_string(path)?;
+		runtime_status_from_code(resin_image_write_png(terminated:get().data, width, height, channels, pixels.data, row_stride))
 	}
 }
 
-fn write_png(self: Ref<ImageData>, path: Ptr<u8>) -> (() | Err<RuntimeError>) {
-	runtime_status_from_code(resin_image_write_png(path, self:width(), self:height(), self:channels(), self:pixels().data, u64(0)))
+fn write_png(self: Ref<ImageData>, path: Span<u8>) -> (() | Err<RuntimeError>) {
+	let view = self:pixels();
+	image_data_write_pixels(path, self:width(), self:height(), self:channels(), view:read_only(), 0)
 }
 
 fn clone(value: Ref<ImageData>) -> ImageData {
 	ImageData { owner = value.owner:clone() }
+}
+
+// Copy exactly the bounded path and terminate it only at the C boundary.
+// Embedded NULs must not silently redirect an operation to a shorter path.
+fn path_string(path: Ref<Span<u8>>) -> String | Err<InvalidArgument> {
+	let mut index: u64 = 0;
+	while (index < path.length) {
+		if (path:at(index) == 0) {
+			return Err(InvalidArgument {});
+		};
+		index = index + 1;
+	};
+	string_from_bytes(path)
 }

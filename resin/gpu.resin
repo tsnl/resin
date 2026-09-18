@@ -51,8 +51,6 @@ const (
 	access_write: u32 = 1 << iota;
 );
 const max_allocation_bytes = ~u64(0);
-// A pointer view derives its available capacity from the retained allocation.
-const allocation_capacity = ~u64(0);
 
 extern type ResinGpu;
 extern type ResinGpuDeviceInfo;
@@ -63,6 +61,7 @@ extern type ResinCommandBuffer;
 // GPU views retain their allocation. Mut permits writes, without unique borrowing.
 // Source wrappers project to borrowed physical pointers and spans for shaders.
 /// A retained, read-only view of one GPU value.
+/// Use GpuSpan when the view represents a sequence.
 struct GpuPtr<T> {
 	view: GpuView,
 }
@@ -81,10 +80,6 @@ fn load<T>(self: Ref<GpuPtr<T>>) -> T {
 fn load<T>(self: Ref<GpuSpan<T>>, index: u64) -> T {
 	let value = self:at(index);
 	value:load()
-}
-
-fn slice<T>(self: Ref<GpuPtr<T>>, start: u64, length: u64) -> GpuSpan<T> {
-	GpuSpan<T> { data = GpuPtr<T> { view = gpu_view_range::<T>(self.view, allocation_capacity, start, length) }, length = length }
 }
 
 fn at<T>(self: Ref<GpuSpan<T>>, index: u64) -> GpuPtr<T> {
@@ -107,6 +102,7 @@ fn clone<T>(value: Ref<GpuSpan<T>>) -> GpuSpan<T> {
 }
 
 /// A retained, writable view of one GPU value. Aliases may share the allocation.
+/// Use GpuSpanMut when the view represents a sequence.
 struct GpuPtrMut<T> {
 	view: GpuView,
 }
@@ -125,10 +121,6 @@ fn load<T>(self: Ref<GpuPtrMut<T>>) -> T {
 fn load<T>(self: Ref<GpuSpanMut<T>>, index: u64) -> T {
 	let value = self:at(index);
 	value:load()
-}
-
-fn slice<T>(self: Ref<GpuPtrMut<T>>, start: u64, length: u64) -> GpuSpanMut<T> {
-	GpuSpanMut<T> { data = GpuPtrMut<T> { view = gpu_view_range::<T>(self.view, allocation_capacity, start, length) }, length = length }
 }
 
 fn at<T>(self: Ref<GpuSpanMut<T>>, index: u64) -> GpuPtrMut<T> {
@@ -279,8 +271,12 @@ fn gpu_device_count() -> (u32 | Err<RuntimeError>) {
 	count:get().*
 }
 
-fn gpu_enumerate_devices(infos: PtrMut<ResinGpuDeviceInfo>, count: u32) -> (() | Err<RuntimeError>) {
-	runtime_status_from_code(resin_gpu_enumerate_devices(infos, count))
+/// Fill a bounded device-info buffer; insufficient capacity returns Incomplete.
+fn gpu_enumerate_devices(infos: SpanMut<ResinGpuDeviceInfo>) -> (() | Err<RuntimeError>) {
+	if (infos.length > u64(0xffffffff)) {
+		return Err(InvalidArgument {});
+	};
+	runtime_status_from_code(resin_gpu_enumerate_devices(infos.data, u32(infos.length)))
 }
 
 fn gpu_new() -> (Gpu | Err<RuntimeError>) {

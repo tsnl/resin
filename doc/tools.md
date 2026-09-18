@@ -51,13 +51,14 @@ The runtime deep-copies the argument and environment arrays and strings before e
 `argv[0]` is the executable invocation name (the owned artifact generation when using `resin FILE`),
 `argv[argc]` is null, and `envp` is a null-terminated array of `NAME=value` strings.
 `envp` is frozen at startup: later environment mutations do not change its values or lookups.
-These process-lifetime views are borrowed and must be treated as read-only; Resin's current
-pointer types do not enforce immutability. Unix preserves native bytes, including non-UTF-8;
-Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surrogates.
+These process-lifetime views are borrowed and expose read-only pointers. Unix preserves
+native bytes, including non-UTF-8; Windows converts its native wide inputs to UTF-8, replacing unpaired UTF-16 surrogates.
 
 `$/process.resin` provides `arguments(argc, argv)` and `environment(envp)` as pointer spans,
 `argument(args, index)` as a checked byte-span view, and `c_string(pointer)` for a valid
-NUL-terminated string. `environment_get(envp, name)` takes a NUL-terminated name and returns
+NUL-terminated string. `environment_get(env, name)` takes the span returned by
+`environment(envp)` and a bounded byte span for the name, such as
+`bytes("RESIN_GREETING")`, and returns
 `(Span<u8> | Err<EnvironmentVariableNotFound>)`. Lookup is exact and case-sensitive on
 all platforms; an empty value succeeds with length zero. It never reads live OS state.
 See `examples/process.resin` for looking up a selected variable without dumping the environment.

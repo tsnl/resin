@@ -172,6 +172,16 @@ pointer value through `Ref<Ptr<T>>` is allowed; that reads the stored capability
 
 ## Indexing and representation
 
+Use `Ptr<T>` for one value and `Span<T>` for a sequence; use their `Mut` variants
+when writes are needed. A span keeps the element count with the address, including
+for paths and text slices. Preserve that length across application and library calls.
+NUL-terminated pointers and pointer/count pairs belong at native or compiler boundaries.
+
+Direct pointer arithmetic (`p + n`, `p - n`, or `p - q`) is rejected. Obtain an
+element address through `view:lea(index)` and a subview through `view:slice(start, length)`.
+Explicit pointer/integer casts remain available for low-level host interop; ordinary
+indexing should not discard bounds by converting addresses to integers.
+
 Arrays, both span kinds, and `str` support `items:at(index)` returning `Ref<T>` (or
 `Ref<u8>` for `str`). The index is `u64`; receivers and indices evaluate once.
 `:at_mut(index)` returns `RefMut<T>` for writable array access and `SpanMut<T>`.

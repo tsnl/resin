@@ -15,11 +15,15 @@ Shader entry points are ordinary functions with declaration decorators:
 
 ```resin
 export { main };
-import { "$/gpu.resin" };
+import { "$/gpu.resin", "$/span.resin" };
+
+struct Root { output: SpanMut<u64> }
 
 @compute_shader
-fn kernel(index: u64, output: PtrMut<u64>) {
-	output.* = index;
+fn kernel(index: u64, root: Ptr<Root>) {
+	if (index < root.output.length) {
+		root.output:at_mut(index) = index;
+	};
 }
 fn main() -> (() | Err<_>) {
 	let gpu = gpu_new()?;

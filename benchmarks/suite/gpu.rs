@@ -150,10 +150,16 @@ impl Device {
 
 #[repr(C)]
 struct Root {
-    count: u32,
     iterations: u32,
-    input: u64,
-    output: u64,
+    input: DeviceSpan,
+    output: DeviceSpan,
+}
+
+// Matches the two-word Span/SpanMut layout used by every Resin workload.
+#[repr(C)]
+struct DeviceSpan {
+    data: u64,
+    length: u64,
 }
 
 struct Buffers {
@@ -197,10 +203,15 @@ impl Buffers {
             std::slice::from_raw_parts_mut(output.host_pointer().cast::<u32>(), count as usize + 1)
                 .fill(CANARY);
             root.host_pointer().cast::<Root>().write(Root {
-                count,
                 iterations: workload.iterations,
-                input: input_buffer.device_pointer(),
-                output: output.device_pointer(),
+                input: DeviceSpan {
+                    data: input_buffer.device_pointer(),
+                    length: u64::from(count),
+                },
+                output: DeviceSpan {
+                    data: output.device_pointer(),
+                    length: u64::from(count),
+                },
             });
             Ok(Self {
                 input: input_buffer,

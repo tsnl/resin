@@ -236,7 +236,7 @@ fn reference_returning_index_wrappers_preserve_nested_places() {
     fn entry_at(items: Ref<SpanMut<Entry>>, index: u64) -> RefMut<Entry>  { items:at_mut(index) }
     fn main() -> i32 | Err<_> {
         let items_owner = arc_ptr_alloc([Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }])?; let items: Ref<_> = items_owner:get().*;
-        let mut span = SpanMut<Entry> { data = PtrMut<Entry>(items_owner:get()), length = u64(2) };
+        let mut span = SpanMut<Entry> { data = items_owner:get():lea(0), length = u64(2) };
         entry_at(span, u64(1)).nested.value = 42;
         let p: RefMut<i32> = entry_at(span, u64(1)).nested.value;
         p = p + 1;

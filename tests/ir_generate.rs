@@ -477,15 +477,23 @@ fn short_circuit_and_compiles() {
 
 #[test]
 fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
-    for body in ["p + 1", "p - 1", "p + p", "-p", "~p", "1 + p", "p(0)"] {
-        let source = format!("fn bad(p: PtrMut<i32>) -> PtrMut<i32>  {{ {body} }}");
-        assert!(generate(&parse(&source)).is_err(), "{source}");
+    for pointer in ["Ptr", "PtrMut"] {
+        for body in [
+            "p + 1", "p - 1", "p - p", "p + p", "p * 2", "p / 2", "p % 2", "p << 1", "p >> 1",
+            "p & p", "p | p", "p ^ p", "-p", "~p", "1 + p", "p(0)",
+        ] {
+            let source = format!("fn bad(p: {pointer}<i32>) {{ {body}; }}");
+            assert!(generate(&parse(&source)).is_err(), "{source}");
+        }
     }
     for body in ["xs(0).* = 3", "xs(1.5)", "xs(0, 1)"] {
         let source = format!("fn bad() -> i32  {{ let mut xs = [1, 2]; {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    compile("fn explicit(p: PtrMut<i32>) -> PtrMut<i32>  { PtrMut<i32>(u64(p) + u64(4)) }");
+    pipeline::source_module(
+        "import { \"$/span.resin\" }; fn explicit(p: Ref<SpanMut<i32>>) -> PtrMut<i32> { p:lea(1) }",
+    ).unwrap();
+    compile("fn native_address(p: PtrMut<i32>) -> PtrMut<i32> { PtrMut<i32>(u64(p)) }");
 }
 
 #[test]

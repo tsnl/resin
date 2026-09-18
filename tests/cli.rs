@@ -794,16 +794,20 @@ fn process_environment_is_frozen_and_distinguishes_empty_from_missing() {
             let mut name = "RESIN_SNAPSHOT_TEST";
             let mut empty = "RESIN_SNAPSHOT_EMPTY";
             let mut missing = "RESIN_SNAPSHOT_MISSING";
-            let mut before = environment_get(envp, name.data)?;
+            let env = environment(envp);
+            let longer_name = bytes("RESIN_SNAPSHOT_TEST_ignored");
+            let bounded_name = longer_name:slice(0, name.length);
+            let mut before = environment_get(env, bounded_name)?;
             let mut status = mutate_environment();
-            let mut after = environment_get(envp, name.data)?;
+            let mut after = environment_get(env, bytes(name))?;
             let mut live = c_string(getenv(name.data));
-            let mut absent = match (environment_get(envp, missing.data)) {{ Span<u8>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
-            let mut env = environment(envp);
+            let mut absent = match (environment_get(env, bytes(missing))) {{ Span<u8>(value) => {{ 1 == 0 }}, Err(error) => {{ 1 == 1 }} }};
+            let hidden = env:slice(0, 0);
+            assert(match (environment_get(hidden, bytes(name))) {{ Span<u8>(_) => {{ false }}, Err(_) => {{ true }} }});
             let mut with_sentinel = Span<Ptr<u8>> {{ data = envp, length = env.length + u64(1) }};
             let text = fmt("{{0}}/{{1}}/{{2}}\n", (before:bytes(), after:bytes(), live:bytes()));
             print(text);
-            (if (status == 0 && absent && environment_get(envp, empty.data)?.length == u64(0)
+            (if (status == 0 && absent && environment_get(env, bytes(empty))?.length == u64(0)
                 && env.length >= u64(2) && u64(with_sentinel:at(env.length)) == u64(0)) {{ 0 }} else {{ 1 }})
         }}"#)).unwrap();
     let output = service
