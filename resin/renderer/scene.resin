@@ -8,11 +8,11 @@ import { "../gpu.resin", "../gltf.resin", "../linalg.resin", "../math.resin", ".
 struct SceneData<V, M, T, P> { vertices: V, materials: M, textures: T, pixels: P }
 type ShaderScene = SceneData<Span<GltfVertex>, Span<GltfMaterial>, Span<GltfTexture>, Span<u8>>;
 type DeviceScene = SceneData<GpuSpan<GltfVertex>, GpuSpan<GltfMaterial>, GpuSpan<GltfTexture>, GpuSpan<u8>>;
-/// Allocate a GPU span and copy a host span into it synchronously.
-fn upload<T>(gpu: Ref<Gpu>, data: Ref<Span<T>>) -> GpuSpan<T> | Err<RuntimeError> {
+/// Upload a host span synchronously and return a retained read-only GPU view.
+fn upload<T>(gpu: Ref<Gpu>, data: Span<T>) -> GpuSpan<T> | Err<RuntimeError> {
 	let result = gpu:alloc::<T>(data.length)?;
 	result:copy_from(data);
-	result
+	result:read_only()
 }
 /// Upload glTF tables without constructing acceleration structures or pipelines.
 /// The returned GPU spans are independent owners. Construct DeviceScene directly
@@ -42,7 +42,7 @@ fn scene_acceleration(gpu: Ref<Gpu>, mesh: Ref<Span<GltfVertex>>) -> GpuRayScene
 		i = i + 1;
 	};
 	let transforms = arc_ptr_alloc([f32(1), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0])?;
-	gpu:create_ray_scene(coordinates, Span<f32> { data = transforms:get():lea(0), length = 12 })
+	gpu:create_ray_scene(coordinates, SpanMut<f32> { data = transforms:get():lea(0), length = 12 })
 }
 
 fn wrapped(index: i32, size: u32, mode: u32) -> u64 {

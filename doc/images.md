@@ -38,15 +38,16 @@ error unions; use `?` to propagate them or `match` to handle failures.
 ## Linear HDR images
 
 `image_data_read_exr(path)` reads the first RGB(A) OpenEXR layer.
-`image_data_read_hdr(path)` reads a Radiance RGBE image. Both return
+`image_data_read_hdr(path)` reads a Radiance RGBE image. Both take bounded paths with the same NUL rejection as PNG and return
 `FloatImageData | Err<RuntimeError>` with packed, top-left-origin RGBA `f32`
 samples. RGB remains linear and unclamped, including values above one and
 negative EXR values. Missing alpha becomes one; alpha is not premultiplied.
 
 The same `:width()`, `:height()`, `:channels()`, `:pixels()`, and `:clone()`
-operations apply; `:pixels()` borrows a `Span<f32>`. Keep the owner alive through
+operations apply; `:pixels()` borrows a `SpanMut<f32>`. Keep the owner alive through
 that borrow. `image:write_exr(path)` preserves the floating-point samples.
-`image_data_write_exr_pixels(path, width, height, samples)` requires exactly
+`image_data_write_exr_pixels(path, width, height, samples)` accepts a read-only
+`Span<f32>` (`view:read_only()` for writable storage) and requires exactly
 `width × height × 4` samples and rejects invalid dimensions/counts before opening
 the output file. These operations do not tone map or change color spaces.
 

@@ -5,8 +5,8 @@ export { ImageData, FloatImageData, width, height, channels, pixels, image_data_
 
 extern {
 	"resin_runtime.h": {
-		fn resin_image_read_exr(path: Ptr<u8>, width: Ptr<u32>, height: Ptr<u32>, pixels: Ptr<Ptr<f32>>) -> i32;
-		fn resin_image_read_hdr(path: Ptr<u8>, width: Ptr<u32>, height: Ptr<u32>, pixels: Ptr<Ptr<f32>>) -> i32;
+		fn resin_image_read_exr(path: Ptr<u8>, width: PtrMut<u32>, height: PtrMut<u32>, pixels: PtrMut<PtrMut<f32>>) -> i32;
+		fn resin_image_read_hdr(path: Ptr<u8>, width: PtrMut<u32>, height: PtrMut<u32>, pixels: PtrMut<PtrMut<f32>>) -> i32;
 		fn resin_image_write_exr(path: Ptr<u8>, width: u32, height: u32, pixels: Ptr<f32>, sample_count: u64) -> i32;
 		fn resin_image_write_png(path: Ptr<u8>, width: u32, height: u32, channels: u32, pixels: Ptr<u8>, stride: u64) -> i32;
 		fn resin_image_read_png(path: Ptr<u8>, channels: u32, width: PtrMut<u32>, height: PtrMut<u32>, actual_channels: PtrMut<u32>, pixels: PtrMut<PtrMut<u8>>) -> i32;
@@ -114,10 +114,10 @@ fn path_string(path: Ref<Span<u8>>) -> String | Err<InvalidArgument> {
 struct FloatImageOwner {
 	width: u32,
 	height: u32,
-	pixels: Ptr<f32>,
+	pixels: PtrMut<f32>,
 }
 fn drop(self: RefMut<FloatImageOwner>) {
-	resin_image_free(Ptr<u8>(self.pixels));
+	resin_image_free(PtrMut<u8>(self.pixels));
 }
 
 /// Shared ownership of packed linear RGBA float32 samples, with top-left origin.
@@ -134,31 +134,32 @@ fn height(self: Ref<FloatImageData>) -> u32 {
 fn channels(self: Ref<FloatImageData>) -> u32 {
 	4
 }
-fn pixels(self: Ref<FloatImageData>) -> Span<f32> {
+fn pixels(self: Ref<FloatImageData>) -> SpanMut<f32> {
 	let data = self.owner:get();
-	Span<f32> { data = data.pixels, length = u64(data.width) * u64(data.height) * 4 }
+	SpanMut<f32> { data = data.pixels, length = u64(data.width) * u64(data.height) * 4 }
 }
 fn clone(self: Ref<FloatImageData>) -> FloatImageData {
 	FloatImageData { owner = self.owner:clone() }
 }
 
 /// Decode the first RGB(A) layer of an OpenEXR file. Missing alpha becomes one.
-fn image_data_read_exr(path: Ptr<u8>) -> FloatImageData | Err<RuntimeError> {
+fn image_data_read_exr(path: Span<u8>) -> FloatImageData | Err<RuntimeError> {
 	read_float_image(path, true)
 }
 
 /// Decode a Radiance RGBE (.hdr) environment map into linear RGBA float32.
-fn image_data_read_hdr(path: Ptr<u8>) -> FloatImageData | Err<RuntimeError> {
+fn image_data_read_hdr(path: Span<u8>) -> FloatImageData | Err<RuntimeError> {
 	read_float_image(path, false)
 }
 
-fn read_float_image(path: Ptr<u8>, exr: bool) -> FloatImageData | Err<RuntimeError> {
-	let owner = arc_ptr_alloc(FloatImageOwner { width = 0, height = 0, pixels = Ptr<f32>(u64(0)) })?;
+fn read_float_image(path: Span<u8>, exr: bool) -> FloatImageData | Err<RuntimeError> {
+	let terminated = path_string(path)?;
+	let owner = arc_ptr_alloc(FloatImageOwner { width = 0, height = 0, pixels = PtrMut<f32>(u64(0)) })?;
 	let data = owner:get();
 	let code = if (exr) {
-		resin_image_read_exr(path, &data.width, &data.height, &data.pixels)
+		resin_image_read_exr(terminated:get().data, &data.width, &data.height, &data.pixels)
 	} else {
-		resin_image_read_hdr(path, &data.width, &data.height, &data.pixels)
+		resin_image_read_hdr(terminated:get().data, &data.width, &data.height, &data.pixels)
 	};
 	runtime_status_from_code(code)?;
 	FloatImageData { owner = owner }
@@ -166,11 +167,12 @@ fn read_float_image(path: Ptr<u8>, exr: bool) -> FloatImageData | Err<RuntimeErr
 
 /// Write a complete packed RGBA float image. The span must contain exactly
 /// width * height * 4 samples; invalid extents preserve any existing file.
-fn image_data_write_exr_pixels(path: Ptr<u8>, width: u32, height: u32, pixels: Ref<Span<f32>>) -> () | Err<RuntimeError> {
-	runtime_status_from_code(resin_image_write_exr(path, width, height, pixels.data, pixels.length))
+fn image_data_write_exr_pixels(path: Span<u8>, width: u32, height: u32, pixels: Span<f32>) -> () | Err<RuntimeError> {
+	let terminated = path_string(path)?;
+	runtime_status_from_code(resin_image_write_exr(terminated:get().data, width, height, pixels.data, pixels.length))
 }
 
-fn write_exr(self: Ref<FloatImageData>, path: Ptr<u8>) -> () | Err<RuntimeError> {
+fn write_exr(self: Ref<FloatImageData>, path: Span<u8>) -> () | Err<RuntimeError> {
 	let view = self:pixels();
-	image_data_write_exr_pixels(path, self:width(), self:height(), view)
+	image_data_write_exr_pixels(path, self:width(), self:height(), view:read_only())
 }

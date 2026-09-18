@@ -47,7 +47,7 @@ fn environment(gpu: Ref<Gpu>, image: Ref<FloatImageData>) -> DeviceEnvironment |
 		i = i + 1;
 	};
 	cdf_data:at_mut(count) = 1;
-	DeviceEnvironment { pixels = upload(gpu, color_data)?, cdf = upload(gpu, cdf_data)?, width = w, height = h, yaw = 0, tint = vec3(1, 1, 1) }
+	DeviceEnvironment { pixels = upload(gpu, color_data:read_only())?, cdf = upload(gpu, cdf_data:read_only())?, width = w, height = h, yaw = 0, tint = vec3(1, 1, 1) }
 }
 const pi: f32 = 3.141592653589793;
 fn solid_angle(w: u32, h: u32, y: u32) -> f32 {

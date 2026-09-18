@@ -5,23 +5,23 @@
 export { Svgf, svgf_create, filter, reset };
 import { "gpu.resin", "linalg.resin", "math.resin", "span.resin", "status.resin", "ownership.resin" };
 
-struct FilterRoot<B> {
-	current: B,
-	positions: B,
-	normals: B,
-	old_color: B,
-	old_positions: B,
-	old_normals: B,
-	old_moments: B,
-	output: B,
-	moments: B,
+struct FilterRoot<I, O> {
+	current: I,
+	positions: I,
+	normals: I,
+	old_color: O,
+	old_positions: O,
+	old_normals: O,
+	old_moments: O,
+	output: O,
+	moments: O,
 	previous_view_projection: Mat4,
 	width: u32,
 	height: u32,
 	valid: u32,
 	step: u32,
 }
-type ShaderFilter = FilterRoot<Span<Vec4>>;
+type ShaderFilter = FilterRoot<Span<Vec4>, SpanMut<Vec4>>;
 // History is unique mutable state. Moving it is safe; implicit copies would
 // share buffers but disagree about which frame those buffers describe.
 struct Svgf {
@@ -31,14 +31,14 @@ struct Svgf {
 	height: u32,
 	valid: bool,
 	previous_view_projection: Mat4,
-	history_color: GpuSpan<Vec4>,
-	history_positions: GpuSpan<Vec4>,
-	history_normals: GpuSpan<Vec4>,
-	history_moments: GpuSpan<Vec4>,
-	temporal: GpuSpan<Vec4>,
-	moments: GpuSpan<Vec4>,
-	ping: GpuSpan<Vec4>,
-	pong: GpuSpan<Vec4>,
+	history_color: GpuSpanMut<Vec4>,
+	history_positions: GpuSpanMut<Vec4>,
+	history_normals: GpuSpanMut<Vec4>,
+	history_moments: GpuSpanMut<Vec4>,
+	temporal: GpuSpanMut<Vec4>,
+	moments: GpuSpanMut<Vec4>,
+	ping: GpuSpanMut<Vec4>,
+	pong: GpuSpanMut<Vec4>,
 	temporal_pipeline: GpuComputePipeline<ShaderFilter, GpuPipelineOwner>,
 	variance_pipeline: GpuComputePipeline<ShaderFilter, GpuPipelineOwner>,
 	atrous_pipeline: GpuComputePipeline<ShaderFilter, GpuPipelineOwner>,
@@ -54,8 +54,8 @@ fn svgf_create(gpu: Ref<Gpu>, width: u32, height: u32) -> Svgf | Err<RuntimeErro
 fn reset(self: RefMut<Svgf>) {
 	self.valid = false;
 }
-fn parameters(self: Ref<Svgf>, current: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSpan<Vec4>>, normals: Ref<GpuSpan<Vec4>>) -> FilterRoot<GpuSpan<Vec4>> {
-	FilterRoot<_> {
+fn parameters(self: Ref<Svgf>, current: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSpan<Vec4>>, normals: Ref<GpuSpan<Vec4>>) -> FilterRoot<GpuSpan<Vec4>, GpuSpanMut<Vec4>> {
+	FilterRoot<_, _> {
 		current = current:clone(),
 		positions = positions:clone(),
 		normals = normals:clone(),
@@ -76,7 +76,7 @@ fn parameters(self: Ref<Svgf>, current: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSp
 		step = 1
 	}
 }
-/// Submit filtering and retain reusable history. Output aliases internal storage
+/// Filter read-only GPU inputs and retain reusable history. Output aliases internal storage
 /// until the next call. Clone retains allocation lifetime, not an immutable snapshot.
 fn filter(self: RefMut<Svgf>, radiance: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSpan<Vec4>>, normals: Ref<GpuSpan<Vec4>>, view_projection: Mat4) -> GpuSpan<Vec4> | Err<RuntimeError> {
 	let count = u64(self.width) * u64(self.height);
@@ -90,15 +90,15 @@ fn filter(self: RefMut<Svgf>, radiance: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSp
 	let commands = self.gpu:start_command_recording()?;
 	let mut root = parameters(self, radiance, positions, normals);
 	commands:dispatch(self.temporal_pipeline, root, groups, 1, 1)?;
-	root.current = self.temporal:clone();
+	root.current = self.temporal:read_only();
 	root.output = self.ping:clone();
 	commands:dispatch(self.variance_pipeline, root, groups, 1, 1)?;
 	let mut level: u32 = 0;
 	while (level < 5) {
 		root.current = if (level % 2 == 0) {
-			self.ping:clone()
+			self.ping:read_only()
 		} else {
-			self.pong:clone()
+			self.pong:read_only()
 		};
 		root.output = if (level % 2 == 0) {
 			self.pong:clone()
@@ -109,7 +109,7 @@ fn filter(self: RefMut<Svgf>, radiance: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSp
 		commands:dispatch(self.atrous_pipeline, root, groups, 1, 1)?;
 		// Feed back only the first spatial level; deeper levels would blur history.
 		if (level == 0) {
-			root.current = self.pong:clone();
+			root.current = self.pong:read_only();
 			commands:dispatch(self.history_pipeline, root, groups, 1, 1)?;
 		};
 		level = level + 1;
@@ -117,7 +117,7 @@ fn filter(self: RefMut<Svgf>, radiance: Ref<GpuSpan<Vec4>>, positions: Ref<GpuSp
 	commands:submit()?;
 	self.previous_view_projection = view_projection;
 	self.valid = true;
-	self.pong:clone()
+	self.pong:read_only()
 }
 fn in_bounds(x: i32, y: i32, width: u32, height: u32) -> bool {
 	x >= 0 && y >= 0 && x < i32(width) && y < i32(height)

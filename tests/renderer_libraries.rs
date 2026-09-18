@@ -51,14 +51,20 @@ fn static_gltf_scene_tables_and_retained_source_owner() {
             .any(|v| v.material == 1 && v.position[0] < -1.5)
     );
     assert_eq!(scene.materials()[3].flags, 5);
-    let source = r#"export { main }; import { "$/gltf.resin", "$/span.resin" };
+    let source = r#"export { main }; import { "$/gltf.resin", "$/span.resin", "$/status.resin" };
         fn main() -> () | Err<_> {
-            let scene = { let original = gltf_load("examples/assets/arris/scene.gltf".data)?; original:clone() };
+            let name = bytes("examples/assets/arris/scene.gltf/ignored");
+            let path = name:slice(0, name.length - 8);
+            let scene = { let original = gltf_load(path)?; original:clone() };
             let mesh = scene:vertices(); let surfaces = scene:materials(); let images = scene:textures();
             assert(mesh.length > 1000 && mesh.length % 3 == 0);
             assert(surfaces.length == 5 && surfaces:at(3).flags == 5);
             assert(images:at(0).width == 8);
             assert(mesh:at(0).position.x == -4);
+            match (gltf_load(bytes("examples/assets/arris/scene.gltf\0ignored"))) {
+                Err(error) => { assert(runtime_status_code(error) == 1); },
+                GltfScene(_) => { assert(false); },
+            };
         }"#;
     let module = support::module(source);
     let output = support::project::Project::new(&module, Some("main"))
@@ -176,14 +182,14 @@ fn headless_gltf_hdri_render_is_finite_and_has_visible_geometry() {
         .replace("frame < 16", "frame < 3")
         .replace("frame == 15", "frame == 2")
         .replace(
-            "save_images(width, height, pixels, filtered)?;",
+            "save_images(width, height, pixel_output, filtered)?;",
             r#"
             let host = arc_span_alloc(count, vec4(0,0,0,0))?;
             positions:copy_to(host:get()); let guides = host:get();
             let mut visible: u32 = 0; let mut i: u64 = 0;
             while (i < count) { if (guides:at(i).w > 0) { visible=visible+1; }; i=i+1; };
             assert(visible > 500 && visible < 2800);
-            save_images(width, height, pixels, filtered)?;
+            save_images(width, height, pixel_output, filtered)?;
         "#,
         );
     let directory = tempfile::tempdir().unwrap();
@@ -249,6 +255,7 @@ fn standalone_svgf_reduces_noise_preserves_background_and_resets() {
     fn main() -> () | Err<_> {
         let gpu=gpu_new()?; let colors=gpu:alloc::<Vec4>(512)?; let positions=gpu:alloc::<Vec4>(512)?; let normals=gpu:alloc::<Vec4>(512)?;
         let mut denoiser=svgf_create(gpu,32,16)?;
+        let color_input=colors:read_only(); let position_input=positions:read_only(); let normal_input=normals:read_only();
         let mut i: u64=0;
         while (i < 512) {
             let x=u32(i%32); let y=u32(i/32); let value=if ((x+y)%2 == 0) { f32(0.5) } else { f32(1.5) };
@@ -256,7 +263,7 @@ fn standalone_svgf_reduces_noise_preserves_background_and_resets() {
             let p=positions:at(i); p:store(vec4(2*(f32(x)+0.5)/32-1,2*(f32(y)+0.5)/16-1,0.5,if (x == 0) { f32(0) } else { f32(1) }));
             let n=normals:at(i); n:store(vec4(0,0,1,1)); i=i+1;
         };
-        let result=denoiser:filter(colors,positions,normals,identity_transform())?;
+        let result=denoiser:filter(color_input,position_input,normal_input,identity_transform())?;
         let host=arc_span_alloc(512,vec4(0,0,0,0))?; result:copy_to(host:get()); let values=host:get();
         let mut variance: f32=0; i=0;
         while (i < 512) {
@@ -265,9 +272,9 @@ fn standalone_svgf_reduces_noise_preserves_background_and_resets() {
             let c=colors:at(i); c:store(vec4(4,4,4,1)); i=i+1;
         };
         assert(variance/496 < 0.03);
-        denoiser:reset(); let changed=denoiser:filter(colors,positions,normals,identity_transform())?;
+        denoiser:reset(); let changed=denoiser:filter(color_input,position_input,normal_input,identity_transform())?;
         changed:copy_to(host:get()); i=0; while (i < 512) { assert(abs(values:at(i).x-4) < 0.001); i=i+1; };
-        let history=denoiser:filter(colors,positions,normals,identity_transform())?;
+        let history=denoiser:filter(color_input,position_input,normal_input,identity_transform())?;
         history:copy_to(host:get()); i=0; while (i < 512) { assert(abs(values:at(i).x-4) < 0.001); i=i+1; };
     }"#;
     let module = support::module(source);
@@ -306,7 +313,8 @@ fn importance_sampling_matches_pdfs_and_white_furnace_energy() {
         assert(sum.x/20000 > 0.9 && sum.x/20000 < 1.03);
         let pixels=arc_span_alloc(8,vec4(2,3,4,1))?; let weights=arc_span_alloc(9,f32(0))?; let cdf=weights:get();
         i=0; while (i <= 8) { cdf:at_mut(u64(i))=f32(i)/8; i=i+1; };
-        let env=ShaderEnvironment { pixels=pixels:get(),cdf=cdf,width=4,height=2,yaw=0.7,tint=vec3(1,1,1) };
+        let color_view=pixels:get();
+        let env=ShaderEnvironment { pixels=color_view:read_only(),cdf=cdf:read_only(),width=4,height=2,yaw=0.7,tint=vec3(1,1,1) };
         let mut direction_sum=vec3(0,0,0); i=0;
         while (i < 10000) {
             let sample=environment_sample(env,random(state),random(state),random(state));
@@ -340,7 +348,7 @@ fn visibility_and_display_compose_without_ray_tracing() {
     import { "$/renderer.resin", "$/gltf.resin", "$/gpu.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
     fn main() -> () | Err<_> {
         let gpu=gpu_new()?;
-        let asset=gltf_load("examples/assets/arris/scene.gltf".data)?;
+        let asset=gltf_load(bytes("examples/assets/arris/scene.gltf"))?;
         let scene=upload_scene(gpu,asset)?;
         let config=gpu:graphics_config(image_rgba32f,true);
         let raster=config:create_graphics_pipeline(primary_vertex,primary_fragment)?;
@@ -354,7 +362,7 @@ fn visibility_and_display_compose_without_ray_tracing() {
         // A caller supplies its own HDR input/output, with no camera or renderer.
         let linear=gpu:alloc::<Vec4>(1)?; let pixel=linear:at(0); pixel:store(vec4(1,3,0,7));
         let display=gpu:alloc::<u8>(4)?;
-        let tone=ToneRoot<GpuSpan<Vec4>,GpuSpan<u8>> { input=linear:clone(),pixels=display:clone(),count=1,exposure=1,gamma=1 };
+        let tone=ToneRoot<GpuSpan<Vec4>,GpuSpanMut<u8>> { input=linear:read_only(),pixels=display:clone(),count=1,exposure=1,gamma=1 };
         let commands=gpu:start_command_recording()?;
         commands:begin_rendering(attachment,depth,0,0,0,0)?;
         commands:draw(raster,root,u32(scene.vertices.length))?;
@@ -392,7 +400,7 @@ fn custom_ray_root_uses_caller_buffers_and_bounded_alpha_traversal() {
     let source = r#"export { main };
     import { "$/renderer.resin", "$/gltf.resin", "$/gpu.resin", "$/linalg.resin", "$/shared.resin", "$/span.resin" };
     struct Probe<S,O> { scene: S, distances: O }
-    type ShaderProbe=Probe<ShaderScene,Span<f32>>;
+    type ShaderProbe=Probe<ShaderScene,SpanMut<f32>>;
     @miss_shader fn miss(initial: Hit,root: Ptr<ShaderProbe>) -> Hit { miss_hit() }
     @closest_hit_shader fn closest(initial: Hit,root: Ptr<ShaderProbe>) -> Hit { closest_hit() }
     @ray_generation_shader fn probe(index: u64,root: Ptr<ShaderProbe>) {
@@ -414,11 +422,12 @@ fn custom_ray_root_uses_caller_buffers_and_bounded_alpha_traversal() {
         };
         let materials_host=arc_span_alloc(2,GltfMaterial { albedo=vec4(1,1,1,1),emissive=vec3(0,0,0),metallic=0,roughness=1,albedo_texture=~u32(0),metallic_roughness_texture=~u32(0),emissive_texture=~u32(0),normal_texture=~u32(0),normal_scale=1,alpha_cutoff=0.5,flags=4 })?;
         let surfaces=materials_host:get(); surfaces:at_mut(0).albedo.w=0; surfaces:at_mut(0).flags=5;
-        let scene=DeviceScene { vertices=upload(gpu,mesh)?,materials=upload(gpu,surfaces)?,textures=gpu:alloc::<GltfTexture>(1)?,pixels=gpu:alloc::<u8>(4)? };
-        let acceleration=scene_acceleration(gpu,mesh)?;
+        let texture_owner=gpu:alloc::<GltfTexture>(1)?; let pixel_owner=gpu:alloc::<u8>(4)?;
+        let scene=DeviceScene { vertices=upload(gpu,mesh:read_only())?,materials=upload(gpu,surfaces:read_only())?,textures=texture_owner:read_only(),pixels=pixel_owner:read_only() };
+        let geometry=mesh:read_only(); let acceleration=scene_acceleration(gpu,geometry)?;
         let tracing=acceleration:create_ray_tracing_pipeline(probe,miss,closest)?;
         let distances=gpu:alloc::<f32>(4)?;
-        let root=Probe<DeviceScene,GpuSpan<f32>> { scene=scene,distances=distances:clone() };
+        let root=Probe<DeviceScene,GpuSpanMut<f32>> { scene=scene,distances=distances:clone() };
         let commands=gpu:start_command_recording()?;
         commands:trace_rays(tracing,root,4,1,1)?; commands:submit()?;
         let host=arc_span_alloc(4,f32(0))?; distances:copy_to(host:get()); let values=host:get();

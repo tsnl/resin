@@ -220,5 +220,5 @@ The final boolean enables LESS depth testing and depth writes. Begin with
 `commands:begin_rendering(color, depth, r, g, b, a)`; this clears depth to one.
 The existing overload without depth remains available. Pipeline and pass formats
 must match. Returning `None` from a fragment shader discards color and depth.
-`copy_image_to_buffer` accepts typed GPU spans, including `Vec4` for RGBA32 float
+`copy_image_to_buffer` accepts writable `GpuSpanMut` outputs, including `Vec4` for RGBA32 float
 and `f32` for depth, and checks their byte capacity. Presentation accepts RGBA8.

@@ -28,10 +28,12 @@ not require creating an RT pipeline: raster and tone mapping work on their own.
 
 ## Data and ownership
 
-`DeviceScene` is a plain record of retained GPU spans: `vertices`, `materials`,
+`DeviceScene` is a plain record of retained read-only `GpuSpan` views: `vertices`, `materials`,
 `textures`, and `pixels`. `upload_scene(gpu, asset)` is a convenience for uploading
 loader output. You can construct the record directly from your own GPU buffers;
-no `GltfScene`, file loader, renderer object, or denoiser is required. The shader
+no `GltfScene`, file loader, renderer object, or denoiser is required. Allocations
+return `GpuSpanMut`; obtain an input view with `:read_only()` and retain a writable
+owner separately when you intend to update its contents. The shader
 view is `ShaderScene`, using borrowed spans with the same glTF table layout.
 Material indices, texture indices, and packed byte offsets must stay in bounds.
 
@@ -68,7 +70,10 @@ commands:copy_image_to_buffer(visibility_image, visibility)?;
 commands:trace_rays(tracing, trace_root, width, height, 1)?;
 commands:submit()?;
 
-let filtered = denoiser:filter(radiance, positions, normals, view_projection)?;
+let linear_input = radiance:read_only();
+let position_input = positions:read_only();
+let normal_input = normals:read_only();
+let filtered = denoiser:filter(linear_input, position_input, normal_input, view_projection)?;
 // Dispatch tone_map into a caller-owned RGBA8 buffer, or consume filtered HDR directly.
 ```
 
@@ -100,7 +105,9 @@ from ray generation. There are no ray queries. This remains compatible with a
 future Metal implementation of Resin's pipeline abstraction, discussed in
 [ray tracing pipelines](ray-tracing-pipelines.md).
 
-`ToneRoot` accepts caller-owned input/output spans, a pixel count, exposure, and
+`ToneRoot` accepts a read-only HDR input and writable RGBA8 output
+(`GpuSpan<Vec4>` / `GpuSpanMut<u8>` on the host, `Span<Vec4>` / `SpanMut<u8>`
+in the shader), a pixel count, exposure, and
 gamma. Dispatch enough invocations for that count, keep input and output storage
 distinct, and provide at least `count` linear RGBA values and `4*count` output
 bytes. Exposure is nonnegative and gamma is positive. Tone mapping leaves the HDR
@@ -116,8 +123,10 @@ With SVGF skipped, each frame is that frame's independent sample average.
 `$/svgf.resin` imports no renderer module. `svgf_create(gpu, width, height)`
 allocates history and compiles its compute pipelines. Call
 `denoiser:filter(radiance, positions, normals, view_projection)` with same-sized
-GPU spans and the current Vulkan zero-to-one view-projection matrix. It returns
-a retained linear RGB buffer whose W component holds estimated variance.
+read-only `GpuSpan<Vec4>` views and the current Vulkan zero-to-one view-projection
+matrix. For writable allocations, bind their `:read_only()` views to locals first.
+The result is a retained read-only linear RGB buffer whose W component holds
+estimated variance.
 
 The filter reprojects history with bilinear taps, rejects inconsistent triangle
 IDs, world positions and normals, and clamps history to a current 3 × 3 color
@@ -135,7 +144,8 @@ is no motion-vector input for moving geometry in this static-scene port.
 
 `$/gltf.resin` is independent of the renderer. `gltf_load(path)` reads `.gltf` or
 `.glb`, external files and embedded data, selecting the default scene or the
-first scene. Its immutable `vertices`, `materials`, `textures`, and
+first scene. Pass a bounded path such as `bytes("scene.glb")`; embedded NULs are
+rejected. Its immutable `vertices`, `materials`, `textures`, and
 `texture_pixels` spans borrow storage owned by the `GltfScene`; retain the owner
 through every use. `:clone()` shares ownership.
 

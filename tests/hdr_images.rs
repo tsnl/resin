@@ -12,18 +12,28 @@ fn source_float_images_keep_ownership_and_validate_bounded_writes() {
         view:at_mut(1) = -0.5;
         view:at_mut(3) = 0.25;
         view:at_mut(7) = 1;
-        image_data_write_exr_pixels("samples.exr".data, 2, 1, view)?;
-        let retained = { let loaded = image_data_read_exr("samples.exr".data)?; loaded:clone() };
+        let name = bytes("samples.exr.not-part-of-the-path");
+        let path = name:slice(0, 11);
+        image_data_write_exr_pixels(path, 2, 1, view:read_only())?;
+        let retained = { let loaded = image_data_read_exr(path)?; loaded:clone() };
         assert(retained:width() == 2 && retained:height() == 1 && retained:channels() == 4);
         let values = retained:pixels();
         assert(values.length == 8 && values:at(0) == 16 && values:at(1) == -0.5 && values:at(3) == 0.25);
-        let rejected = match (image_data_write_exr_pixels("samples.exr".data, 3, 1, view)) {
+        let rejected = match (image_data_write_exr_pixels(bytes("samples.exr"), 3, 1, view:read_only())) {
             ()(value) => { false }, Err(error) => { true },
         };
         assert(rejected);
-        let unchanged = image_data_read_exr("samples.exr".data)?;
+        let unchanged = image_data_read_exr(bytes("samples.exr"))?;
         assert(unchanged:width() == 2);
-        retained:write_exr("copy.exr".data)?;
+        retained:write_exr(bytes("copy.exr"))?;
+        match (image_data_read_exr(bytes("samples.exr\0ignored"))) {
+            Err(error) => { assert(runtime_status_code(error) == 1); },
+            FloatImageData(_) => { assert(false); },
+        };
+        match (retained:write_exr(bytes("samples.exr\0ignored"))) {
+            Err(error) => { assert(runtime_status_code(error) == 1); },
+            ()(_) => { assert(false); },
+        };
     }"#;
     let module = support::module(source);
     let project = support::project::Project::new(&module, Some("main")).unwrap();

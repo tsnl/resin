@@ -24,14 +24,14 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () | Err<_> {
 	};
 	let args = Span<Ptr<u8>> { data = argv, length = u64(argc) };
 	let scene_path = if (argc > 1) {
-		args:at(1)
+		args:argument(1)
 	} else {
-		"examples/assets/arris/scene.gltf".data
+		bytes("examples/assets/arris/scene.gltf")
 	};
 	let env_path = if (argc > 2) {
-		args:at(2)
+		args:argument(2)
 	} else {
-		"examples/assets/arris/studio.hdr".data
+		bytes("examples/assets/arris/studio.hdr")
 	};
 	let gpu = gpu_new()?;
 	if (!gpu:supports_ray_tracing()) {
@@ -39,8 +39,7 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () | Err<_> {
 		return Err(Unsupported {});
 	};
 	let asset = gltf_load(scene_path)?;
-	let name = c_string(env_path);
-	let hdr = has_suffix(name, ".hdr");
+	let hdr = has_suffix(env_path, ".hdr");
 	let lighting = if (hdr) {
 		image_data_read_hdr(env_path)?
 	} else {
@@ -73,6 +72,11 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () | Err<_> {
 	let tracing = acceleration:create_ray_tracing_pipeline(generation, miss, closest)?;
 	let tone_mapping = gpu:create_compute_pipeline(tone_map)?;
 	let mut denoiser = svgf_create(gpu, width, height)?;
+	// Later passes read these outputs through views that cannot write them.
+	let linear_input = radiance:read_only();
+	let position_input = positions:read_only();
+	let normal_input = normals:read_only();
+	let pixel_output = pixels:read_only();
 	let groups = u32((count + gpu:compute_workgroup_size() - 1) / gpu:compute_workgroup_size());
 
 	// The camera looks down local -Z. Change this pose to frame your own scene.
@@ -81,7 +85,7 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () | Err<_> {
 	let view_projection = mul(perspective(view.focal_length, view.sensor_size, view.near, view.far), inverse_rigid(view.transform));
 	let eye = vec3(view.transform.r0.w, view.transform.r1.w, view.transform.r2.w);
 	let raster_root = RasterRoot<DeviceScene> { scene = scene, view_projection = view_projection, eye = eye };
-	let mut trace_root = TraceRoot<DeviceScene, DeviceEnvironment, GpuSpan<Vec4>, GpuSpan<Vec4>> { scene = scene, environment = sky, visibility = visibility:clone(), radiance = radiance:clone(), positions = positions:clone(), normals = normals:clone(), camera = view, width = width, height = height, frame = 0, samples_per_frame = 2, max_bounces = 4 };
+	let mut trace_root = TraceRoot<DeviceScene, DeviceEnvironment, GpuSpan<Vec4>, GpuSpanMut<Vec4>> { scene = scene, environment = sky, visibility = visibility:read_only(), radiance = radiance:clone(), positions = positions:clone(), normals = normals:clone(), camera = view, width = width, height = height, frame = 0, samples_per_frame = 2, max_bounces = 4 };
 
 	// A frame is ordinary command recording. The depth-tested raster pass stores
 	// triangle IDs and barycentrics. MASK holes return None and preserve depth.
@@ -99,15 +103,15 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> () | Err<_> {
 		commands:submit()?;
 
 		// Denoising is a separate choice. To inspect raw samples, replace this
-		// call with radiance:clone(). Call denoiser:reset() after a camera cut or
+		// call with linear_input:clone(). Call denoiser:reset() after a camera cut or
 		// lighting edit; ordinary camera motion is reprojected using this matrix.
-		let filtered = denoiser:filter(radiance, positions, normals, view_projection)?;
-		let tone_root = ToneRoot<GpuSpan<Vec4>, GpuSpan<u8>> { input = filtered:clone(), pixels = pixels:clone(), count = count, exposure = 1, gamma = 2.2 };
+		let filtered = denoiser:filter(linear_input, position_input, normal_input, view_projection)?;
+		let tone_root = ToneRoot<GpuSpan<Vec4>, GpuSpanMut<u8>> { input = filtered:clone(), pixels = pixels:clone(), count = count, exposure = 1, gamma = 2.2 };
 		let display = gpu:start_command_recording()?;
 		display:dispatch(tone_mapping, tone_root, groups, 1, 1)?;
 		display:submit()?;
 		if (frame == 15) {
-			save_images(width, height, pixels, filtered)?;
+			save_images(width, height, pixel_output, filtered)?;
 		};
 		frame = frame + 1;
 		let message = fmt("rendered frame {0} / 16\n", (frame,));
@@ -134,7 +138,7 @@ struct TraceRoot<S, E, V, O> {
 	samples_per_frame: u32,
 	max_bounces: u32,
 }
-type ShaderTrace = TraceRoot<ShaderScene, ShaderEnvironment, Span<Vec4>, Span<Vec4>>;
+type ShaderTrace = TraceRoot<ShaderScene, ShaderEnvironment, Span<Vec4>, SpanMut<Vec4>>;
 
 // Pipeline stages share a Hit payload. These tiny adapters bind the reusable
 // helpers to our own shader root; they can serve any ray-generation algorithm.
@@ -232,10 +236,10 @@ fn generation(index: u64, root: Ptr<ShaderTrace>) {
 // linear radiance goes to EXR. SVGF stores variance in W, so replace it with alpha.
 fn save_images(width: u32, height: u32, pixels: Ref<GpuSpan<u8>>, radiance: Ref<GpuSpan<Vec4>>) -> () | Err<_> {
 	let count = u64(width) * u64(height);
-	let bytes = arc_span_alloc(count * 4, u8(0))?;
-	pixels:copy_to(bytes:get());
-	let rgba = bytes:get();
-	image_data_write_pixels("arris.png".data, width, height, 4, rgba, 0)?;
+	let host_pixels = arc_span_alloc(count * 4, u8(0))?;
+	pixels:copy_to(host_pixels:get());
+	let rgba = host_pixels:get();
+	image_data_write_pixels(bytes("arris.png"), width, height, 4, rgba:read_only(), 0)?;
 	let host = arc_span_alloc(count, vec4(0, 0, 0, 1))?;
 	radiance:copy_to(host:get());
 	let data = host:get();
@@ -245,11 +249,11 @@ fn save_images(width: u32, height: u32, pixels: Ref<GpuSpan<u8>>, radiance: Ref<
 		i = i + 1;
 	};
 	let floats = Span<f32> { data = Ptr<f32>(data.data), length = count * 4 };
-	image_data_write_exr_pixels("arris.exr".data, width, height, floats)
+	image_data_write_exr_pixels(bytes("arris.exr"), width, height, floats)
 }
 
-// Paths are borrowed NUL-terminated process strings. Compare their bounded byte
-// views to choose a decoder without copying the filename.
+// Paths are bounded byte spans, including those borrowed from process arguments.
+// Select a decoder without copying the filename.
 fn has_suffix(text: Ref<Span<u8>>, suffix: str) -> bool {
 	if (text.length < suffix.length) {
 		return false;

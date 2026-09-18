@@ -116,7 +116,7 @@ fn display(value: f32, exposure: f32, gamma: f32) -> u8 {
 	u8(clamp(pow(mapped, 1 / gamma) * 255 + 0.5, 0, 255))
 }
 @compute_shader
-fn tone_map(index: u64, root: Ptr<ToneRoot<Span<Vec4>, Span<u8>>>) {
+fn tone_map(index: u64, root: Ptr<ToneRoot<Span<Vec4>, SpanMut<u8>>>) {
 	if (index < root.count) {
 		let color = root.input:at(index);
 		root.pixels:at_mut(index * 4) = display(color.x, root.exposure, root.gamma);

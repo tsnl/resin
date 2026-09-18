@@ -5,13 +5,13 @@
 export { GltfScene, GltfVertex, GltfMaterial, GltfTexture, gltf_load, vertices, materials, textures, texture_pixels, clone };
 extern {
 	"resin_runtime.h": {
-		fn resin_gltf_load(path: Ptr<u8>, output: Ptr<Ptr<ResinGltfScene>>) -> i32;
+		fn resin_gltf_load(path: Ptr<u8>, output: PtrMut<PtrMut<ResinGltfScene>>) -> i32;
 		fn resin_gltf_count(scene: Ptr<ResinGltfScene>, table: u32) -> u64;
-		fn resin_gltf_free(scene: Ptr<ResinGltfScene>);
-		fn resin_gltf_table(scene: Ptr<ResinGltfScene>, table: u32, length: Ptr<u64>) -> Ptr<u8>;
+		fn resin_gltf_free(scene: PtrMut<ResinGltfScene>);
+		fn resin_gltf_table(scene: Ptr<ResinGltfScene>, table: u32, length: PtrMut<u64>) -> Ptr<u8>;
 	},
 };
-import { "linalg.resin", "span.resin", "shared.resin", "status.resin", "internal/status_codes.resin" };
+import { "linalg.resin", "span.resin", "shared.resin", "status.resin", "string.resin", "internal/status_codes.resin" };
 extern type ResinGltfScene;
 
 /// Every three consecutive vertices form a triangle. All its material indices agree.
@@ -33,14 +33,16 @@ struct GltfMaterial {
 /// Packed RGBA8 image and sampler. Wrap codes are glTF's GL enums; nearest=0
 /// selects bilinear filtering. Mipmap minification is currently reduced to level zero.
 struct GltfTexture { first_byte: u64, width: u32, height: u32, wrap_s: u32, wrap_t: u32, nearest: u32, reserved: u32 }
-struct GltfOwner { handle: Ptr<ResinGltfScene> }
+struct GltfOwner { handle: PtrMut<ResinGltfScene> }
 fn drop(self: RefMut<GltfOwner>) {
 	resin_gltf_free(self.handle);
 }
 struct GltfScene { owner: ArcPtr<GltfOwner> }
-fn gltf_load(path: Ptr<u8>) -> GltfScene | Err<RuntimeError> {
-	let owner = arc_ptr_alloc(GltfOwner { handle = Ptr<ResinGltfScene>(u64(0)) })?;
-	runtime_status_from_code(resin_gltf_load(path, &owner:get().handle))?;
+/// Load a bounded path; embedded NULs are rejected before the native call.
+fn gltf_load(path: Span<u8>) -> GltfScene | Err<RuntimeError> {
+	let terminated = path_string(path)?;
+	let owner = arc_ptr_alloc(GltfOwner { handle = PtrMut<ResinGltfScene>(u64(0)) })?;
+	runtime_status_from_code(resin_gltf_load(terminated:get().data, &owner:get().handle))?;
 	GltfScene { owner = owner }
 }
 fn clone(self: Ref<GltfScene>) -> GltfScene {
@@ -48,7 +50,7 @@ fn clone(self: Ref<GltfScene>) -> GltfScene {
 }
 fn table<T>(self: Ref<GltfScene>, index: u32) -> Span<T> {
 	let count = resin_gltf_count(self.owner:get().handle, index);
-	let data = resin_gltf_table(self.owner:get().handle, index, Ptr<u64>(u64(0)));
+	let data = resin_gltf_table(self.owner:get().handle, index, PtrMut<u64>(u64(0)));
 	Span<T> { data = Ptr<T>(data), length = count }
 }
 fn vertices(self: Ref<GltfScene>) -> Span<GltfVertex> {
@@ -62,4 +64,16 @@ fn textures(self: Ref<GltfScene>) -> Span<GltfTexture> {
 }
 fn texture_pixels(self: Ref<GltfScene>) -> Span<u8> {
 	self:table::<u8>(3)
+}
+
+// Preserve the bounded path until the native API requires a terminated copy.
+fn path_string(path: Ref<Span<u8>>) -> String | Err<InvalidArgument> {
+	let mut index: u64 = 0;
+	while (index < path.length) {
+		if (path:at(index) == 0) {
+			return Err(InvalidArgument {});
+		};
+		index = index + 1;
+	};
+	string_from_bytes(path)
 }
