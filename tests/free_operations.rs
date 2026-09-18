@@ -70,7 +70,7 @@ fn gpu_bridges_borrow_receivers_and_pipelines_through_native_generation() {
     let source = r#"
         export { main };
         import { "$/gpu.resin" };
-        @compute_shader fn kernel(index: u64, root: Ptr<u32>) { root.* = u32(index); }
+        @compute_shader fn kernel(index: u64, root: PtrMut<u32>) { root.* = u32(index); }
         fn main() -> i32 | Err<_> {
             if (false) {
                 let gpu = gpu_new()?;

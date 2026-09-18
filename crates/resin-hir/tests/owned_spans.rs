@@ -11,13 +11,13 @@ fn generate(source: &str) -> Result<resin_hir::Module, resin_source::SourceError
 fn owner_operations_keep_generic_payloads_in_ordinary_signatures() {
     let module = generate(
         r#"intrinsic "owner_allocate" fn allocate<T>(count: u64, initial: T) -> StrongOwner | None;
-        intrinsic "owner_data" fn data<T>(owner: Ref<StrongOwner>) -> Ptr<T>;
+        intrinsic "owner_data" fn data<T>(owner: Ref<StrongOwner>) -> PtrMut<T>;
         struct Shared<T> { owner: StrongOwner,
             
         }
-fn get<T>(self: Ref<Shared<T>>) -> Ptr<T>  { data::<T>(self.owner) }
+fn get<T>(self: Ref<Shared<T>>) -> PtrMut<T>  { data::<T>(self.owner) }
 
-        fn borrow<T>(value: Ref<Shared<T>>) -> Ptr<T>  { value:get() }
+        fn borrow<T>(value: Ref<Shared<T>>) -> PtrMut<T>  { value:get() }
     "#,
     )
     .unwrap();
@@ -33,7 +33,7 @@ fn get<T>(self: Ref<Shared<T>>) -> Ptr<T>  { data::<T>(self.owner) }
             .kind,
         TermKind::Intrinsic { .. }
     ));
-    let Type::Pointer { pointee } = &module
+    let Type::Pointer { pointee, .. } = &module
         .functions
         .iter()
         .find(|f| f.name.as_ref() == "data")
@@ -64,9 +64,9 @@ fn owner_handles_cannot_be_constructed_or_dereferenced() {
 fn owner_primitives_reject_forged_contracts() {
     for source in [
         r#"intrinsic "owner_allocate" fn bad<T>(count: i32, initial: T) -> StrongOwner | None;"#,
-        r#"intrinsic "owner_data" fn bad<T>(owner: StrongOwner) -> Ptr<T>;"#,
-        r#"intrinsic "owner_upgrade" fn bad(owner: Ptr<StrongOwner>) -> StrongOwner | None;"#,
-        r#"intrinsic "owner_downgrade" fn bad(owner: Ptr<StrongOwner>) -> StrongOwner;"#,
+        r#"intrinsic "owner_data" fn bad<T>(owner: StrongOwner) -> PtrMut<T>;"#,
+        r#"intrinsic "owner_upgrade" fn bad(owner: PtrMut<StrongOwner>) -> StrongOwner | None;"#,
+        r#"intrinsic "owner_downgrade" fn bad(owner: PtrMut<StrongOwner>) -> StrongOwner;"#,
     ] {
         assert!(generate(source).is_err(), "{source}");
     }

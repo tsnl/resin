@@ -11,7 +11,7 @@ export { ArgParser, Argument, argparse, next, named, argument_integer, argument_
 
 extern {
 	"stdlib.h": {
-		fn strtod(text: Ptr<u8>, end: Ptr<Ptr<u8>>) -> f64;
+		fn strtod(text: Ptr<u8>, end: PtrMut<Ptr<u8>>) -> f64;
 	},
 };
 

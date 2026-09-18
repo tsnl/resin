@@ -1,6 +1,7 @@
 # GPU pointers, spans, and shader arguments
 
-`GpuPtr<T>` owns a view into a GPU allocation. `GpuSpan<T>` adds an element count.
+`GpuPtr<T>` owns a read-only view into a GPU allocation. `GpuSpan<T>` adds an element count.
+`GpuPtrMut<T>` and `GpuSpanMut<T>` grant write access as well.
 Value copies, explicit clones, indexed pointers, and slices retain the allocation and its GPU. Both are
 ordinary generic source structs over an opaque `GpuView` primitive. Neither
 exposes a raw host pointer or a device-address query. Import `$/gpu.resin` for
@@ -9,14 +10,14 @@ need an explicit `$/span.resin` import.
 
 ```resin
 let gpu = gpu_new()?;
-let scalar = gpu:create(42)?;                  // GpuPtr<i64>, inferred from the value
+let scalar = gpu:create(42)?;                  // GpuPtrMut<i64>, inferred from the value
 let values = gpu:alloc::<f32>(1024)?;
 let mut index: u64 = 0;
 while (index < values.length) {
-    values:at(index):store(f32(1.0));
+    values:store(index, f32(1.0));
     index = index + u64(1);
 };
-let first = values:slice(0, 16);            // GpuSpan<f32>, same owner
+let first = values:slice(0, 16);            // GpuSpanMut<f32>, same owner
 let readable = first:read_only();
 ```
 
@@ -37,22 +38,24 @@ application; the default `f64` has no supported shader storage layout.
 
 ## Checked host access
 
-`pointer:load()`, `pointer:store(value)`, and `pointer:replace(value)` perform
+Both pointer kinds support `pointer:load()`. Mutable pointers additionally support
+`pointer:store(value)` and `pointer:replace(value)`. These perform
 checked host access; `replace` returns the previous value. `span:at(index)`
 returns an owning pointer, and `:slice(start, length)` returns an owning span.
 Indexing and slicing check bounds. To update a field, load its containing record,
 edit the local value, then store the record back. Host GPU views do not produce
 places or raw field addresses.
 
-Each view carries host read/write permissions. `:read_only()` and `:write_only()`
-remove the other permission and cannot restore previously removed permissions.
+Write permission is part of the view type. `:read_only()` returns the read-only
+counterpart and restricts its runtime access too. `:write_only()` is a runtime
+restriction on a writable view: reads trap. Neither restores removed permissions.
 Their checks apply to loads, stores, replacements, and copies. Existing aliases
 keep their own permissions. Access also checks the allocation range, alignment,
 host mapping, and whether a recording currently holds the allocation for GPU work.
 An invalid host access traps. These are compiler/runtime checks, not OS page
 protection or a static borrow checker.
 
-Use `span:copy_to(destination)` to copy into an ordinary `Span<T>` whose memory the
+Use `span:copy_to(destination)` to copy into an ordinary `SpanMut<T>` whose memory the
 caller owns. This checks GPU read permissions and the destination length; it does
 not expose a raw pointer into the GPU allocation. [Gradient](../examples/gradient.resin)
 and [triangle](../examples/triangle.resin) copy completed GPU output into host
@@ -64,7 +67,7 @@ Create pipelines from decorated shader declarations. The compiler preserves thei
 root type and stage, then checks host arguments when recording a dispatch or draw:
 
 ```resin
-struct Params { values: Span<f32>, scale: f32, }
+struct Params { values: SpanMut<f32>, scale: f32, }
 
 @compute_shader
 fn kernel(index: u64, root: Ptr<Params>)  {
@@ -74,7 +77,7 @@ fn kernel(index: u64, root: Ptr<Params>)  {
     };
 }
 
-struct HostParams { values: GpuSpan<f32>, scale: f32, }
+struct HostParams { values: GpuSpanMut<f32>, scale: f32, }
 let pipeline = gpu:create_compute_pipeline(kernel)?;
 let commands = gpu:start_command_recording()?;
 commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
@@ -96,7 +99,8 @@ authorize a different root or stage.
 
 Dispatch and draw derive the host record from the pipeline's declared root type: a
 shader `Ptr<T>` field receives a host `GpuPtr<T>`, and a shader `Span<T>` field
-receives a host `GpuSpan<T>`. Scalars and nested records keep their values. The
+receives a host `GpuSpan<T>`. The writable `PtrMut`/`SpanMut` fields require
+`GpuPtrMut`/`GpuSpanMut`. Scalars and nested records keep their values. The
 compiler validates explicit projection declarations on the source wrappers,
 creates a separate shader root, translates GPU views internally, and
 retains every referenced allocation. An indexed or sliced view preserves its byte
@@ -107,8 +111,8 @@ Pipeline creation requires decorated declarations directly. Runtime function ali
 and arbitrary shader bytes are not accepted. Compiled representations are private to
 code generation and the runtime; shader functions have no `.spirv` property. Pointers inside GPU buffer elements are rejected:
 projection handles the launch record, not recursively mapped pointer graphs. Raw
-host pointers cannot substitute for GPU views. Current shader pointers allow both
-reads and writes, so projection requires views with both permissions. Shader pointer
+host pointers cannot substitute for GPU views. Projection preserves read-only or writable permissions from the declared pointer
+and span types. Shader pointer
 casts are rejected, including pointer/integer conversions and reinterpretation of a
 pointer's element type. Use typed indexing for buffer access.
 

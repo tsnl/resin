@@ -13,7 +13,7 @@ fn convert(i: u32) -> u32 {
 	}
 }
 @compute_shader
-fn kernel(i: u64, p: Ptr<u32>) {
+fn kernel(i: u64, p: PtrMut<u32>) {
 	if (i == u64(0)) {
 		p.* = convert(u32(i));
 	};

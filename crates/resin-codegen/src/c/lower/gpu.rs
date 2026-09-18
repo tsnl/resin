@@ -71,7 +71,7 @@ pub(super) fn instruction(
             })
         }
         Instr::GpuViewCopyTo => {
-            let Ty::Pointer { pointee } = &args[2].ty else {
+            let Ty::Pointer { pointee, .. } = &args[2].ty else {
                 unreachable!("verified GPU copy")
             };
             let bytes = checked_bytes(types, pointee, &args[1].expr, name, out);
@@ -85,7 +85,7 @@ pub(super) fn instruction(
             Ok("0".into())
         }
         Instr::GpuViewCopyFrom => {
-            let Ty::Pointer { pointee } = &args[2].ty else {
+            let Ty::Pointer { pointee, .. } = &args[2].ty else {
                 unreachable!("verified GPU copy")
             };
             let bytes = checked_bytes(types, pointee, &args[3].expr, name, out);

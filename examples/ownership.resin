@@ -7,7 +7,7 @@ struct Failed {}
 struct Allocation {
 	data: ArcSpan<i32>,
 }
-fn get(self: Ref<Allocation>) -> Span<i32> {
+fn get(self: Ref<Allocation>) -> SpanMut<i32> {
 	self.data:get()
 }
 

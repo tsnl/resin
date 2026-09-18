@@ -375,7 +375,7 @@ impl Checker<'_> {
                             referent,
                             mutable: false,
                         },
-                    ) => (referent, super::types::ty(&Ty::byte_span())),
+                    ) => (referent, super::types::ty(&Ty::byte_span(false))),
                     _ => return Err(invalid()),
                 };
                 let crate::Type::Defined {
@@ -1732,7 +1732,33 @@ impl Expression<'_, '_> {
             }
             resin_ast::TermKind::Address { place } => {
                 let place = self.child(place, None);
-                self.constrain((span, Constraint::Address(place.ty.clone(), out.clone())));
+                let mut bases = vec![];
+                let mut base = &place;
+                loop {
+                    base = match &base.kind {
+                        TermKind::Field { base, .. } => {
+                            bases.push(super::infer::AddressBase::Field {
+                                receiver: base.ty.clone(),
+                            });
+                            base
+                        }
+                        TermKind::Deref { pointer } => {
+                            bases.push(super::infer::AddressBase::Deref {
+                                pointer: pointer.ty.clone(),
+                            });
+                            pointer
+                        }
+                        _ => break,
+                    };
+                }
+                self.constrain((
+                    span,
+                    Constraint::Address {
+                        pointee: place.ty.clone(),
+                        bases,
+                        result: out.clone(),
+                    },
+                ));
                 TermKind::Address {
                     place: Box::new(place),
                 }

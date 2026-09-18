@@ -9,12 +9,12 @@ struct Pair {
 	a: u32,
 	b: u32,
 }
-fn touch(p: Ptr<State>) -> u32 {
+fn touch(p: PtrMut<State>) -> u32 {
 	let mut old = p.counter;
 	p.counter = old + u32(1);
 	old
 }
-fn choose(p: Ptr<State>) -> Ptr<u32> {
+fn choose(p: PtrMut<State>) -> PtrMut<u32> {
 	touch(p);
 	&p.result
 }
@@ -22,7 +22,7 @@ fn identity(n: u32) -> u32 {
 	n
 }
 @compute_shader
-fn kernel(i: u64, root: Ptr<State>) {
+fn kernel(i: u64, root: PtrMut<State>) {
 	if (i == u64(0)) {
 		let mut x: u32 = 0;
 		x = if (i == u64(0)) {

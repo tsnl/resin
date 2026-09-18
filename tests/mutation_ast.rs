@@ -155,7 +155,7 @@ fn assignment_is_right_associative_and_deref_is_explicit() {
 
 #[test]
 fn assignment_can_be_sequenced_in_a_block() {
-    let file = parse("fn f (p: Ptr<i32>) -> i32  { p.* = 1; p.* }");
+    let file = parse("fn f (p: PtrMut<i32>) -> i32  { p.* = 1; p.* }");
     let StmtKind::Function { body, .. } = &file.stmts[0].val else {
         panic!("expected function definition");
     };

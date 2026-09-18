@@ -39,8 +39,8 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
 
         struct Data { marker: u32, wide: u64, amount: f32, }
         struct Payload { tag: u32, data: Data, end: u32, }
-        struct Params { count: u32, values: Ptr<Payload>, tail: f32, }
-        fn at (values: Ptr<Payload>, index: u32) -> RefMut<Payload>  { device_index(values, u64(67), u64(index)).* }
+        struct Params { count: u32, values: PtrMut<Payload>, tail: f32, }
+        fn at (values: PtrMut<Payload>, index: u32) -> RefMut<Payload>  { device_index(values, u64(67), u64(index)).* }
         fn bump (p: RefMut<Payload>, index: u32) -> ()  {
             let old: Ref<Payload> = p;
             p = Payload {
@@ -49,7 +49,7 @@ fn typed_device_buffers_match_host_layout_and_preserve_bounds() {
                 end = old.end + u32(2)
             };
         }
-        @compute_shader fn kernel (invocation: u64, root: Ptr<Params>) -> ()  { let mut index = u32(invocation);
+        @compute_shader fn kernel (invocation: u64, root: PtrMut<Params>) -> ()  { let mut index = u32(invocation);
             if (index < root.count) {
                 let p: RefMut<Payload> = at(root.values, index);
                 bump(p, index)
@@ -372,7 +372,7 @@ fn fragment_shaders_read_typed_root_parameters() {
     file.stmts.retain(|stmt| !matches!(&stmt.val, resin_ast::StmtKind::Function { name, .. } if matches!(name.val.as_ref(), "fragment" | "main")));
     file.stmts.extend(
         support::parse(
-            "export { fragment }; fn main()  {} @fragment_shader fn fragment (color: Color, root: Ptr<Color>) -> Color { Color { r = root.r, g = root.g, b = root.b, a = root.a } }",
+            "export { fragment }; fn main()  {} @fragment_shader fn fragment (color: Color, root: PtrMut<Color>) -> Color { Color { r = root.r, g = root.g, b = root.b, a = root.a } }",
         )
         .stmts,
     );
@@ -420,7 +420,7 @@ fn fragment_shaders_read_typed_root_parameters() {
 #[test]
 fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
     compute_values(
-        "export { kernel }; import { \"$/span.resin\" }; struct PixelRoot { count: u32, pixels: Ptr<u32>, } @compute_shader fn kernel(invocation: u64, root: Ptr<PixelRoot>)  { let mut index = u32(invocation); if (index < root.count) { let mut output = Span<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(index)).* = { let mut total: u32 = 0; let mut n = index; while (n > u32(0) && n <= index) { let mut j: u32 = 0; while (j < n) { total = total + u32(1); j = j + u32(1); }; n = n - u32(1); }; total }; }; }",
+        "export { kernel }; import { \"$/span.resin\" }; struct PixelRoot { count: u32, pixels: PtrMut<u32>, } @compute_shader fn kernel(invocation: u64, root: PtrMut<PixelRoot>)  { let mut index = u32(invocation); if (index < root.count) { let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(index)).* = { let mut total: u32 = 0; let mut n = index; while (n > u32(0) && n <= index) { let mut j: u32 = 0; while (j < n) { total = total + u32(1); j = j + u32(1); }; n = n - u32(1); }; total }; }; }",
         |index| index * (index + 1) / 2,
     );
 }
@@ -428,7 +428,7 @@ fn shader_while_loops_execute_with_nested_and_zero_trip_iterations() {
 #[test]
 fn shader_results_propagate_and_match_union_payloads_on_device() {
     compute_values(
-        "export { kernel }; import { \"$/span.resin\" }; struct Zero {} struct Odd { index: u32, } fn checked(i: u32) -> (u32 | Err<Zero | Odd>)  { if (i == u32(0)) { Err(Zero {}) } else { if ((i & u32(1)) == u32(1)) { Err(Odd { index = i }) } else { (i) } } } fn add(i: u32) -> (u32 | Err<_>)  { let mut value = checked(i)?; (value + u32(10)) } struct PixelRoot { count: u32, pixels: Ptr<u32>, } @compute_shader fn kernel(invocation: u64, root: Ptr<PixelRoot>)  { let mut i = u32(invocation); if (i < root.count) { let mut output = Span<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(i)).* = { match (add(i)) { u32(value) => { value }, Err(error) => { match (error) { Zero(zero) => { u32(0) }, Odd(odd) => { odd.index * u32(2) } } } } }; }; }",
+        "export { kernel }; import { \"$/span.resin\" }; struct Zero {} struct Odd { index: u32, } fn checked(i: u32) -> (u32 | Err<Zero | Odd>)  { if (i == u32(0)) { Err(Zero {}) } else { if ((i & u32(1)) == u32(1)) { Err(Odd { index = i }) } else { (i) } } } fn add(i: u32) -> (u32 | Err<_>)  { let mut value = checked(i)?; (value + u32(10)) } struct PixelRoot { count: u32, pixels: PtrMut<u32>, } @compute_shader fn kernel(invocation: u64, root: PtrMut<PixelRoot>)  { let mut i = u32(invocation); if (i < root.count) { let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(i)).* = { match (add(i)) { u32(value) => { value }, Err(error) => { match (error) { Zero(zero) => { u32(0) }, Odd(odd) => { odd.index * u32(2) } } } } }; }; }",
         |index| {
             if index == 0 {
                 0
@@ -445,11 +445,11 @@ fn shader_results_propagate_and_match_union_payloads_on_device() {
 fn optional_unwrap_stops_shader_callers_on_none() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
+        struct Root { count: u32, pixels: PtrMut<u32>, }
         fn choose(i: u32) -> u32  { let mut value: u32 | None; value = if ((i & u32(1)) == u32(0)) { i } else { None }; value! }
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut i = u32(invocation);
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  { let mut i = u32(invocation);
             if (i < root.count) {
-                let mut output = Span<u32> { data = root.pixels, length = u64(67) };
+                let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) };
                 device_index(output.data, output.length, u64(i)).* = u32(7);
                 let mut value = choose(i);
                 device_index(output.data, output.length, u64(i)).* = value + u32(1);
@@ -463,16 +463,16 @@ fn optional_unwrap_stops_shader_callers_on_none() {
 fn none_elimination_preserves_shader_union_members() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
+        struct Root { count: u32, pixels: PtrMut<u32>, }
         fn choose(i: u32) -> u32 | bool | None  {
             if ((i & u32(3)) == u32(0)) { None } else { if ((i & u32(3)) == u32(1)) { i } else { u32(1) == u32(1) } }
         }
         fn read(i: u32) -> u32  {
             match (choose(i)!) { u32(n) => { n + u32(1) }, bool(b) => { if (b) { u32(42) } else { u32(0) } } }
         }
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut i = u32(invocation);
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  { let mut i = u32(invocation);
             if (i < root.count) {
-                let mut output = Span<u32> { data = root.pixels, length = u64(67) };
+                let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) };
                 device_index(output.data, output.length, u64(i)).* = u32(7);
                 device_index(output.data, output.length, u64(i)).* = read(i);
             };
@@ -489,7 +489,7 @@ fn none_elimination_preserves_shader_union_members() {
 fn inherent_methods_execute_in_shader_helpers() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
+        struct Root { count: u32, pixels: PtrMut<u32>, }
         struct Counter { value: u32,
             
             
@@ -502,11 +502,11 @@ fn add(self: Counter, n: u32, m: u32) -> Counter  { Counter { value = self.value
 fn read(self: Counter) -> u32  { self.value }
 
 
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut id = u32(invocation);
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  { let mut id = u32(invocation);
             if (id < root.count) {
                 let mut counter = counter_new(id);
                 let mut incremented = counter:add(u32(1), u32(2));
-                let mut output = Span<u32> { data = root.pixels, length = u64(67) };
+                let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) };
                 device_index(output.data, output.length, u64(id)).* = incremented:read();
             };
         }
@@ -519,13 +519,13 @@ fn read(self: Counter) -> u32  { self.value }
 fn template_helpers_execute_with_shader_specific_instances() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
+        struct Root { count: u32, pixels: PtrMut<u32>, }
         fn increment<T>(value: T) -> T  { value + 1 }
         fn twice<U>(value: U) -> U  { increment(increment(value)) }
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  {
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  {
             let mut index = u32(invocation);
             if (index < root.count) {
-                let mut output = Span<u32> { data = root.pixels, length = u64(67) };
+                let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) };
                 device_index(output.data, output.length, invocation).* = twice(index);
             };
         }"#,
@@ -538,15 +538,15 @@ fn at_indexing_mutates_shader_arrays_and_span_fields() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
         struct FieldsValues<T0> { values: T0, }
-struct Root { count: u32, pixels: Ptr<u32>, }
+struct Root { count: u32, pixels: PtrMut<u32>, }
         fn read(i: u32) -> u32  {
             let mut values = [u32(10), u32(20)];
             let previous = values:at(u64(0)); values:at_mut(u64(0)) = i;
             values:at(u64(i & u32(1))) + values:at(u64(i & u32(1))) + previous - u32(10)
         }
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut i = u32(invocation);
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  { let mut i = u32(invocation);
             if (i < root.count) {
-                let mut holder = FieldsValues<_> { values = Span<u32> { data = root.pixels, length = u64(67) } };
+                let mut holder = FieldsValues<_> { values = SpanMut<u32> { data = root.pixels, length = u64(67) } };
                 device_index(holder.values.data, holder.values.length, u64(i)).* = u32(7);
                 let mut value = read(i);
                 device_index(holder.values.data, holder.values.length, u64(i)).* = value;
@@ -625,10 +625,10 @@ fn one_compute_artifact_specializes_for_each_suitable_device() {
     let module = module(
         r#"export { kernel };
         import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
+        struct Root { count: u32, pixels: PtrMut<u32>, }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {
             if (index < u64(root.count)) {
-                let mut pixels = Span<u32> { data = root.pixels, length = u64(root.count) };
+                let mut pixels = SpanMut<u32> { data = root.pixels, length = u64(root.count) };
                 device_index(pixels.data, pixels.length, index).* = u32(index) + u32(1);
             };
         }
@@ -778,7 +778,7 @@ fn shader_array_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
         fn read(i: u32) -> u32  { let mut values = [u32(10), u32(20), u32(30)]; values(i) }
-        struct PixelRoot { count: u32, pixels: Ptr<u32>, } @compute_shader fn kernel(invocation: u64, root: Ptr<PixelRoot>)  { let mut i = u32(invocation); if (i < u32(3)) { let mut output = Span<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(i)).* = { read(i) + u32(1) }; }; }"#,
+        struct PixelRoot { count: u32, pixels: PtrMut<u32>, } @compute_shader fn kernel(invocation: u64, root: PtrMut<PixelRoot>)  { let mut i = u32(invocation); if (i < u32(3)) { let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(i)).* = { read(i) + u32(1) }; }; }"#,
         |i| if i < 3 { (i + 1) * 10 + 1 } else { u32::MAX },
     );
 }
@@ -787,12 +787,12 @@ fn shader_array_indexing_with_an_explicit_bounds_guard() {
 fn shader_span_indexing_with_an_explicit_bounds_guard() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
-        fn write(i: u32, pixels: Span<u32>)  { device_index(pixels.data, pixels.length, u64(i)).* = u32(42); }
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut i = u32(invocation);
-            let mut pixels = Span<u32> { data = root.pixels, length = u64(3) };
+        struct Root { count: u32, pixels: PtrMut<u32>, }
+        fn write(i: u32, pixels: SpanMut<u32>)  { device_index(pixels.data, pixels.length, u64(i)).* = u32(42); }
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  { let mut i = u32(invocation);
+            let mut pixels = SpanMut<u32> { data = root.pixels, length = u64(3) };
             if (u64(i) < pixels.length) {
-                write(i, Span<u32> { data = pixels.data, length = pixels.length });
+                write(i, SpanMut<u32> { data = pixels.data, length = pixels.length });
                 device_index(pixels.data, pixels.length, u64(i)).* = u32(43);
             };
         }"#,
@@ -804,7 +804,7 @@ fn shader_span_indexing_with_an_explicit_bounds_guard() {
 fn contextual_literals_and_one_armed_if_execute_on_device() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct PixelRoot { count: u32, pixels: Ptr<u32>, } @compute_shader fn kernel(invocation: u64, root: Ptr<PixelRoot>)  { let mut i = u32(invocation); if (i < root.count) { let mut output = Span<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(i)).* = {
+        struct PixelRoot { count: u32, pixels: PtrMut<u32>, } @compute_shader fn kernel(invocation: u64, root: PtrMut<PixelRoot>)  { let mut i = u32(invocation); if (i < root.count) { let mut output = SpanMut<u32> { data = root.pixels, length = u64(67) }; device_index(output.data, output.length, u64(i)).* = {
             let mut result: u32 = 0;
             if ((i & u32(1)) == u32(0)) { result = i + u32(10); };
             if (f32(1.5) + f32(2.5) == f32(4) && u64(42) > u64(0)) { result = result + u32(1); };
@@ -869,7 +869,7 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
         "i32(f32(1.0) / f32(0.0))",
     ] {
         let source = format!(
-            "export {{ kernel }}; fn invalid()  {{ {expression}; }} @compute_shader fn kernel(invocation: u64, p: Ptr<u32>)  {{ let mut i = u32(invocation); if (i == u32(0)) {{ invalid(); p.* = u32(99); }}; }}"
+            "export {{ kernel }}; fn invalid()  {{ {expression}; }} @compute_shader fn kernel(invocation: u64, p: PtrMut<u32>)  {{ let mut i = u32(invocation); if (i == u32(0)) {{ invalid(); p.* = u32(99); }}; }}"
         );
         execute_interaction(&source, [0, 0]);
     }
@@ -879,14 +879,14 @@ fn numeric_conversion_failures_stop_shader_helpers_before_stores() {
 fn byte_spans_read_and_write_device_storage() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u8>, }
-        fn read(bytes: Span<u8>, index: u64) -> u8  { device_index(bytes.data, bytes.length, index).* }
-        @compute_shader fn kernel(invocation: u64, root: Ptr<Root>)  { let mut i = u32(invocation);
+        struct Root { count: u32, pixels: PtrMut<u8>, }
+        fn read(bytes: SpanMut<u8>, index: u64) -> u8  { device_index(bytes.data, bytes.length, index).* }
+        @compute_shader fn kernel(invocation: u64, root: PtrMut<Root>)  { let mut i = u32(invocation);
             if (i < root.count) {
-                let mut bytes = Span<u8> { data = root.pixels, length = u64(root.count) * u64(4) };
+                let mut bytes = SpanMut<u8> { data = root.pixels, length = u64(root.count) * u64(4) };
                 let mut offset = u64(i) * u64(4);
                 device_index(bytes.data, bytes.length, offset).* = u8(65);
-                device_index(bytes.data, bytes.length, offset + u64(1)).* = read(Span<u8> { data = bytes.data, length = bytes.length }, offset) + u8(1);
+                device_index(bytes.data, bytes.length, offset + u64(1)).* = read(SpanMut<u8> { data = bytes.data, length = bytes.length }, offset) + u8(1);
                 device_index(bytes.data, bytes.length, offset + u64(2)).* = u8(0);
                 device_index(bytes.data, bytes.length, offset + u64(3)).* = u8(255);
             };
@@ -899,15 +899,15 @@ fn byte_spans_read_and_write_device_storage() {
 fn packed_byte_arrays_execute_in_shaders() {
     compute_values(
         r#"export { kernel }; import { "$/span.resin" };
-        struct Root { count: u32, pixels: Ptr<u32>, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
+        struct Root { count: u32, pixels: PtrMut<u32>, }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {
             if (index < u64(root.count)) {
                 let mut rows = [[u8(65), u8(66)], [u8(0), u8(255)]];
                 let mut row = rows:at(index & u64(1));
                 let mut copy = row;
                 row:at_mut(u64(0)) = u8(99);
                 let mut packed = u32(copy:at(u64(0))) + u32(copy:at(u64(1))) * u32(256);
-                let mut output = Span<u32> { data = root.pixels, length = u64(root.count) };
+                let mut output = SpanMut<u32> { data = root.pixels, length = u64(root.count) };
                 device_index(output.data, output.length, index).* = packed + u32(size_of(rows)) * u32(65536);
             };
         }"#,
@@ -936,6 +936,6 @@ fn structured_loops_propagate_errors_from_conditions_and_nested_bodies() {
 
 fn module(source: &str) -> resin_lir::Module {
     support::module(&format!(
-        r#"{source} intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;"#
+        r#"{source} intrinsic "pointer_index_mut" fn device_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;"#
     ))
 }

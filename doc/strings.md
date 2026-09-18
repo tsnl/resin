@@ -54,7 +54,7 @@ has overloads for `str`, `Ref<Span<u8>>`, and `Ref<String>`, writes bytes verbat
 it terminates on an output error. Neither writer interprets braces. Both `fmt` and `print`
 are ordinary source functions and host-only.
 
-Byte arrays and device-backed `Span<u8>` values support shader reads and writes using
+Byte arrays and device-backed `SpanMut<u8>` values support shader reads and writes using
 8-bit storage and arithmetic extensions. The runtime enables the corresponding Vulkan features when available.
 Shader `str` literals remain unsupported: the backend does not yet provide addressable
 constant storage for the device addresses used by Resin spans. Pass a span of uploaded bytes in the shader root instead.

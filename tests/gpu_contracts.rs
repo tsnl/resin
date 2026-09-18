@@ -4,9 +4,9 @@ use resin_source::{Loader, Source, library_root};
 use resin_types::{GpuProjectionOperation, Ty};
 
 const CONTRACTS: &str = r#"struct DeviceReference<T> { allocation: GpuView, }
-    struct HostRange<T> { pointer: Ptr<T>, count: u64, }
+    struct HostRange<T> { pointer: PtrMut<T>, count: u64, }
     struct DeviceRange<T> { pointer: DeviceReference<T>, count: u64, }
-    intrinsic "gpu_pointer_projection" fn project_pointer<T>(value: DeviceReference<T>) -> Ptr<T>;
+    intrinsic "gpu_pointer_projection" fn project_pointer<T>(value: DeviceReference<T>) -> PtrMut<T>;
     intrinsic "gpu_span_projection" fn project_range<T>(value: DeviceRange<T>) -> HostRange<T>;
 "#;
 
@@ -14,7 +14,7 @@ const CONTRACTS: &str = r#"struct DeviceReference<T> { allocation: GpuView, }
 fn source_gpu_contracts_retain_nominal_identity_and_produce_concrete_plans() {
     let source = format!(
         r#"{CONTRACTS}
-        fn materialize(value: DeviceRange<u32>, output: Ptr<HostRange<u32>>)  {{}}
+        fn materialize(value: DeviceRange<u32>, output: PtrMut<HostRange<u32>>)  {{}}
     "#
     );
     let hir = support::hir(&source);
@@ -39,13 +39,17 @@ fn source_gpu_contracts_retain_nominal_identity_and_produce_concrete_plans() {
         .find(|f| f.name.as_deref() == Some("materialize"))
         .unwrap();
     let source = &function.locals[0].ty;
-    let Ty::Pointer { pointee: target } = &function.locals[1].ty else {
+    let Ty::Pointer {
+        pointee: target, ..
+    } = &function.locals[1].ty
+    else {
         panic!("target parameter");
     };
     let plan = resin_types::gpu_projection_plan(&module.types, source, target).unwrap();
     assert!(matches!(
         plan.operation,
         GpuProjectionOperation::Sequence {
+            writable: true,
             element: Ty::UInt32
         }
     ));
@@ -54,6 +58,7 @@ fn source_gpu_contracts_retain_nominal_identity_and_produce_concrete_plans() {
             &module.types,
             source,
             &Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::Float32)
             }
         )
@@ -64,9 +69,9 @@ fn source_gpu_contracts_retain_nominal_identity_and_produce_concrete_plans() {
 #[test]
 fn projection_registration_rejects_invalid_representations_and_retagged_elements() {
     for source in [
-        r#"struct View<T> { raw: Ptr<T>, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<T>;"#,
-        r#"struct View<T> { allocation: GpuView, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<u64>;"#,
-        r#"struct View<T> { allocation: GpuView, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> Ptr<T>; intrinsic "gpu_pointer_projection" fn duplicate<T>(value: View<T>) -> Ptr<T>;"#,
+        r#"struct View<T> { raw: PtrMut<T>, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> PtrMut<T>;"#,
+        r#"struct View<T> { allocation: GpuView, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> PtrMut<u64>;"#,
+        r#"struct View<T> { allocation: GpuView, } intrinsic "gpu_pointer_projection" fn register<T>(value: View<T>) -> PtrMut<T>; intrinsic "gpu_pointer_projection" fn duplicate<T>(value: View<T>) -> PtrMut<T>;"#,
     ] {
         let error = support::frontend::check_hir(&support::program(source))
             .into_module()
@@ -84,7 +89,7 @@ fn projection_registration_rejects_invalid_representations_and_retagged_elements
 fn source_cannot_call_a_projection_contract_to_escape_a_device_address() {
     let source = format!(
         r#"{CONTRACTS}
-        fn escape(value: DeviceReference<u32>) -> Ptr<u32>  {{ project_pointer(value) }}
+        fn escape(value: DeviceReference<u32>) -> PtrMut<u32>  {{ project_pointer(value) }}
     "#
     );
     let hir = support::hir(&source);
@@ -214,7 +219,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
             let mut tail = values:slice(u64(1), u64(2));
             let mut alias = tail.data:slice(u64(1), u64(1));
             let output_owner = arc_ptr_alloc([i32(0), i32(0)])?; let output: Ref<_> = output_owner:get().*;
-            { let borrowed = tail:read_only(); borrowed:copy_to(Span<i32> { data = output_owner:get():lea(u64(0)), length = u64(2) }) };
+            { let borrowed = tail:read_only(); borrowed:copy_to(SpanMut<i32> { data = output_owner:get():lea(u64(0)), length = u64(2) }) };
             let mut readback = gpu:alloc_in::<u8>(u64(64), memory_readback)?;
             (())
         }

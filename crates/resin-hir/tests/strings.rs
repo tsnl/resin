@@ -47,6 +47,7 @@ fn string_views_support_fields_and_indexing() {
     assert_eq!(
         result(&module, "data"),
         Type::Pointer {
+            mutable: false,
             pointee: Box::new(Type::UInt8)
         }
     );

@@ -65,7 +65,7 @@ fn errors_accumulate_across_propagation() {
 #[test]
 fn nested_error_unions_flatten_and_holes_remain_monomorphic() {
     let m = module(
-        "struct A {} struct B {} fn nested() -> ((i32 | Err<_>) | Err<_>)  { ((42)) } fn outer() -> ((Ptr<i32> | Err<A>) | Err<B>)  { Err(B {}) }",
+        "struct A {} struct B {} fn nested() -> ((i32 | Err<_>) | Err<_>)  { ((42)) } fn outer() -> ((PtrMut<i32> | Err<A>) | Err<B>)  { Err(B {}) }",
     );
     assert_eq!(
         m.functions[0].result,
@@ -120,7 +120,7 @@ fn recursive_error_sets_reach_a_fixed_point() {
 #[test]
 fn mutable_pointers_do_not_widen_and_bad_matches_are_rejected() {
     rejects(
-        "struct A {} struct B {} fn f(p: Ptr<(i32 | Err<A>)>) -> Ptr<(i32 | Err<A | B>)>  { p }",
+        "struct A {} struct B {} fn f(p: PtrMut<(i32 | Err<A>)>) -> PtrMut<(i32 | Err<A | B>)>  { p }",
         "TypeMismatch",
     );
     rejects(
@@ -136,7 +136,10 @@ fn mutable_pointers_do_not_widen_and_bad_matches_are_rejected() {
         "TypeMismatch",
     );
     rejects("struct A {} fn f(x: (i32 | Err<_>))  {}", "only allowed");
-    rejects("type Recursive = Ptr<Recursive>;", "recursive type alias");
+    rejects(
+        "type Recursive = PtrMut<Recursive>;",
+        "recursive type alias",
+    );
 }
 
 #[test]

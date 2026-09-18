@@ -319,6 +319,15 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   initialized storage. Shared owners copy by retaining their allocation; explicit `clone` operations remain available.
   `ICopy`/`IClone`, traits, effects, and general function CTFE remain deferred.
   See `doc/lifetimes.md` for lifecycle rules.
+- Access permissions are explicit: `Ptr<T>` is read-only, `PtrMut<T>` is writable.
+  Carry the permission through HIR, specialization, LIR verification, and projection.
+  `PtrMut<T>` may weaken to `Ptr<T>` with the exact same pointee type; never strengthen
+  or implicitly turn either reference kind into a pointer. Nested pointers are invariant.
+  `Span`/`SpanMut` and `GpuPtr`/`GpuPtrMut`, `GpuSpan`/`GpuSpanMut` are source structs;
+  use their explicit `read_only` methods. Allocation and host shared-owner `get` return
+  writable views. Access is aliasable and independent of `let mut` on a binding.
+  Literal bytes and process input snapshots expose read-only pointers. Host GPU element
+  operations borrow their view; an offset operation does not itself retain its owner.
 - Pointer families distinguish one value from a sequence: `Ptr<T>` / `Span<T>` are
   borrowed, `ArcPtr<T>` / `ArcSpan<T>` retain host ownership, `WeakPtr<T>` /
   `WeakSpan<T>` observe host ownership, and `GpuPtr<T>` / `GpuSpan<T>` retain GPU
@@ -326,13 +335,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   `ArcPtr<Span<T>>` owns a descriptor, while `ArcSpan<T>` owns its elements.
   `arc_span_alloc::<T>(count, initial)` returns `(ArcSpan<T> | Err<OutOfMemory>)`, checks
   allocation arithmetic, and initializes every element using a copyable initializer.
-  Final release destroys elements in reverse order. `get()` borrows a `Span<T>`;
+  Final release destroys elements in reverse order. `get()` borrows a `SpanMut<T>`;
   `arc_ptr_alloc(initial)` moves one initialized value into its allocation. Both are ordinary
   source functions from `$/shared.resin`, backed by non-generic `StrongOwner` and
   `WeakOwner` primitives. Initialize native handles inside an inert shared payload.
   Borrowed views do not retain the owner. Numeric spans expose exact element bytes
   through `as_bytes()`. Image pixel writes accept bounded `Span<u8>` views.
-- `Span`, shared/weak owners, GPU views, typed pipelines, and `String` are source structs.
+- `Span`/`SpanMut`, shared/weak owners, GPU views, typed pipelines, and `String` are source structs.
   Keep only non-generic `StrongOwner`, `WeakOwner`, `GpuView`, and `GpuPipelineContract`
   handles in the compiler. Explicit intrinsic declarations register GPU wrapper projections;
   dispatch/draw consume completed projection plans checked again by the verifier.
@@ -395,14 +404,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   before storage lowering. Diagnostics render source type names instead of private type IDs.
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
-  The explicit-workgroup prototype additionally permits a third `RefMut<State>`
+  Compute additionally permits a third `RefMut<State>`
   parameter, spelled `Workgroup<State>` through `$/workgroup.resin`. GPU wrappers
   provide zero-initialized Workgroup storage; ordinary host calls borrow a local
   and execute as one lane. Keep synchronization explicit and preserve per-thread
   entry/index/dispatch semantics. Check shared-reference origins in SPIR-V and
   reject checked-failure paths for these entries; uniform barrier participation
   and race freedom remain the programmer's responsibility. See `doc/workgroups.md`.
-  Compute entries take `(u64, Ptr<T>)` and return unit; their index is the global X invocation
+  Compute entries take `(u64, Ptr<T>)` or `(u64, PtrMut<T>)` and return unit; their index is the global X invocation
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   Pipeline creation accepts decorated shader declarations directly and requests their compiled
   representation internally. Shader functions have no bytecode property. Runtime shader aliases
@@ -430,8 +439,8 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   A pointer dereference and its field projections remain addressable. Parameters and
   results retain their Ref/Ptr contract through generic specialization. Ref parameters require initialized places: locals, fields, pointer dereferences,
   or reference-valued results. Bind temporary values to explicit locals before borrowing. HIR retains reference use;
-  specialization preserves distinct concrete Ref/Ptr types. LIR LocalRef and Borrow
-  produce writable references, never pointers; ReadOnly weakens them. Verification rejects reference-to-pointer
+  specialization preserves distinct concrete Ref/Ptr types. LIR LocalRef produces a writable reference; Borrow preserves the pointer permission
+  in a reference, never a pointer. ReadOnly weakens mutable references and pointers. Verification rejects reference-to-pointer
   conversions; only final target lowering chooses an address representation.
   Reject direct reference aggregate payloads, nested references, and reference-valued
   generic arguments. Shader-local references can cross helper calls using Function

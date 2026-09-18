@@ -52,7 +52,7 @@ fn arithmetic_and_literals_remain_polymorphic_and_enclosing_binders_are_preserve
 #[test]
 fn members_and_layout_queries_retain_determining_types() {
     let module = compile(
-        "fn read<T>(value: Ptr<T>) -> _  { value.member } fn measure<T>() -> u64  { size_of(T) }",
+        "fn read<T>(value: PtrMut<T>) -> _  { value.member } fn measure<T>() -> u64  { size_of(T) }",
     )
     .unwrap();
     assert!(matches!(

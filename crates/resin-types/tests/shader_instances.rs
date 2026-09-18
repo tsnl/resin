@@ -55,6 +55,7 @@ fn managed_fields_are_opaque_and_do_not_require_shader_payload_types() {
         shader::value_type(
             &definitions,
             &Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::Defined {
                     definition: TypeId::from_index(0)
                 })
@@ -66,6 +67,7 @@ fn managed_fields_are_opaque_and_do_not_require_shader_payload_types() {
         shader::value_type(
             &[],
             &Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::Bool)
             }
         )

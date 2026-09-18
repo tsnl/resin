@@ -185,6 +185,7 @@ pub enum Type {
         arguments: Vec<Type>,
     },
     Pointer {
+        mutable: bool,
         pointee: Box<Type>,
     },
     /// A fixed, nonowning binding: read-only `Ref` or writable, aliasable `RefMut`.
@@ -1189,6 +1190,7 @@ fn builtin_hover(document: &resin_cst::Document, token: resin_cst::Node<'_>) -> 
             token.kind(),
             "builtin_type"
                 | "Ptr"
+                | "PtrMut"
                 | "Ref"
                 | "RefMut"
                 | "GpuPipelineContract"
@@ -1314,7 +1316,12 @@ const BUILTINS: &[(&str, &str, DefinitionKind)] = &[
     ),
     (
         "Ptr",
-        "Ptr<T>\n\nAn unchecked pointer to T.",
+        "Ptr<T>\n\nAn unchecked read-only pointer to T. Does not grant writable access.",
+        DefinitionKind::Type,
+    ),
+    (
+        "PtrMut",
+        "PtrMut<T>\n\nAn unchecked writable pointer to T. May be passed as Ptr<T>; does not imply exclusive access.",
         DefinitionKind::Type,
     ),
     (
@@ -1589,7 +1596,7 @@ impl Analysis {
             return;
         }
         let mut receiver = ty;
-        while let Type::Pointer { pointee } = receiver {
+        while let Type::Pointer { pointee, .. } = receiver {
             receiver = pointee;
         }
         let body = match receiver {
@@ -1673,7 +1680,7 @@ impl Analysis {
         solver: &lower::infer::Solver,
     ) {
         let mut owner = ty;
-        while let Type::Pointer { pointee } = owner {
+        while let Type::Pointer { pointee, .. } = owner {
             owner = pointee;
         }
         let Type::Defined {
@@ -1824,8 +1831,8 @@ fn source_method_receiver(
         return false;
     };
     let source = lower::infer::Type::from_hir(receiver);
-    let mut candidates = vec![source.clone(), lower::infer::Type::pointer(source)];
-    if let Type::Pointer { pointee } = receiver {
+    let mut candidates = vec![source.clone(), lower::infer::Type::pointer(source, true)];
+    if let Type::Pointer { pointee, .. } = receiver {
         candidates.push(lower::infer::Type::from_hir(pointee));
     }
     candidates.into_iter().any(|candidate| {

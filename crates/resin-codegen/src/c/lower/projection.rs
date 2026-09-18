@@ -98,11 +98,13 @@ fn project_value(
     let (_, destination) = representation(types, &plan.target, destination);
     match &plan.operation {
         GpuProjectionOperation::Copy => unreachable!(),
-        GpuProjectionOperation::Pointer { element } => {
+        GpuProjectionOperation::Pointer { element, writable } => {
+            let access = if *writable { 3 } else { 1 };
             let ty = types.name(element);
-            writeln!(out, "    {destination} = ({}) (uintptr_t) resin_gpu_projection_pointer({projection}, ({source}).f0, sizeof({ty}), _Alignof({ty}));", types.name(&plan.target)).unwrap();
+            writeln!(out, "    {destination} = ({}) (uintptr_t) resin_gpu_projection_pointer({projection}, ({source}).f0, sizeof({ty}), _Alignof({ty}), {access}u);", types.name(&plan.target)).unwrap();
         }
-        GpuProjectionOperation::Sequence { element } => {
+        GpuProjectionOperation::Sequence { element, writable } => {
+            let access = if *writable { 3 } else { 1 };
             let Ty::Record { fields } = source_type else {
                 unreachable!("sequence source representation")
             };
@@ -110,7 +112,7 @@ fn project_value(
             let ty = types.name(element);
             writeln!(out, "    if (({source}).f1 > SIZE_MAX / sizeof({ty})) resin_fail(\"GPU projection length overflow\");").unwrap();
             let bytes = format!("(({source}).f1 * sizeof({ty}))");
-            writeln!(out, "    ({destination}).f0 = ({ty} *) (uintptr_t) resin_gpu_projection_pointer({projection}, ({pointer}).f0, {bytes}, _Alignof({ty}));").unwrap();
+            writeln!(out, "    ({destination}).f0 = ({ty} *) (uintptr_t) resin_gpu_projection_pointer({projection}, ({pointer}).f0, {bytes}, _Alignof({ty}), {access}u);").unwrap();
             writeln!(out, "    ({destination}).f1 = ({source}).f1;").unwrap();
         }
         GpuProjectionOperation::Record { fields } => {

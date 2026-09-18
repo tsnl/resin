@@ -4,21 +4,21 @@ export { Window, ResinWindow, ButtonState, key_unknown, key_space, key_apostroph
 
 extern {
 	"resin_runtime.h": {
-		fn resin_window_create(width: u32, height: u32, title: Ptr<u8>, window: Ptr<Ptr<ResinWindow>>) -> i32;
-		fn resin_window_destroy(window: Ptr<ResinWindow>) -> ();
-		fn resin_window_poll_events(window: Ptr<ResinWindow>) -> i32;
-		fn resin_window_wait_events(window: Ptr<ResinWindow>, timeout: f64) -> i32;
-		fn resin_window_should_close(window: Ptr<ResinWindow>) -> i32;
-		fn resin_window_set_should_close(window: Ptr<ResinWindow>, close: i32) -> i32;
-		fn resin_window_framebuffer_size(window: Ptr<ResinWindow>, width: Ptr<u32>, height: Ptr<u32>) -> i32;
-		fn resin_window_set_size(window: Ptr<ResinWindow>, width: u32, height: u32) -> i32;
-		fn resin_window_key_pressed(window: Ptr<ResinWindow>, key: i32) -> i32;
-		fn resin_window_key_state(window: Ptr<ResinWindow>, key: i32) -> u32;
-		fn resin_window_mouse_button_state(window: Ptr<ResinWindow>, button: i32) -> u32;
-		fn resin_window_cursor_position(window: Ptr<ResinWindow>, x: Ptr<f64>, y: Ptr<f64>) -> i32;
-		fn resin_window_scroll_delta(window: Ptr<ResinWindow>, x: Ptr<f64>, y: Ptr<f64>) -> i32;
-		fn resin_window_focused(window: Ptr<ResinWindow>) -> i32;
-		fn resin_window_capture_cursor(window: Ptr<ResinWindow>, capture: i32) -> i32;
+		fn resin_window_create(width: u32, height: u32, title: Ptr<u8>, window: PtrMut<PtrMut<ResinWindow>>) -> i32;
+		fn resin_window_destroy(window: PtrMut<ResinWindow>) -> ();
+		fn resin_window_poll_events(window: PtrMut<ResinWindow>) -> i32;
+		fn resin_window_wait_events(window: PtrMut<ResinWindow>, timeout: f64) -> i32;
+		fn resin_window_should_close(window: PtrMut<ResinWindow>) -> i32;
+		fn resin_window_set_should_close(window: PtrMut<ResinWindow>, close: i32) -> i32;
+		fn resin_window_framebuffer_size(window: PtrMut<ResinWindow>, width: PtrMut<u32>, height: PtrMut<u32>) -> i32;
+		fn resin_window_set_size(window: PtrMut<ResinWindow>, width: u32, height: u32) -> i32;
+		fn resin_window_key_pressed(window: PtrMut<ResinWindow>, key: i32) -> i32;
+		fn resin_window_key_state(window: PtrMut<ResinWindow>, key: i32) -> u32;
+		fn resin_window_mouse_button_state(window: PtrMut<ResinWindow>, button: i32) -> u32;
+		fn resin_window_cursor_position(window: PtrMut<ResinWindow>, x: PtrMut<f64>, y: PtrMut<f64>) -> i32;
+		fn resin_window_scroll_delta(window: PtrMut<ResinWindow>, x: PtrMut<f64>, y: PtrMut<f64>) -> i32;
+		fn resin_window_focused(window: PtrMut<ResinWindow>) -> i32;
+		fn resin_window_capture_cursor(window: PtrMut<ResinWindow>, capture: i32) -> i32;
 	},
 };
 
@@ -213,7 +213,7 @@ fn button_state(bits: u32) -> ButtonState {
 
 extern type ResinWindow;
 struct WindowOwner {
-	handle: Ptr<ResinWindow>,
+	handle: PtrMut<ResinWindow>,
 }
 fn drop(self: RefMut<WindowOwner>) {
 	if (u64(self.handle) != u64(0)) {
@@ -224,12 +224,12 @@ fn drop(self: RefMut<WindowOwner>) {
 struct Window {
 	owner: ArcPtr<WindowOwner>,
 }
-fn native(self: Ref<Window>) -> Ptr<ResinWindow> {
+fn native(self: Ref<Window>) -> PtrMut<ResinWindow> {
 	self.owner:get().handle
 }
 
 fn window_new(width: u32, height: u32, title: Ref<String>) -> (Window | Err<RuntimeError>) {
-	let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = Ptr<ResinWindow>(u64(0)) })?;
+	let mut owner = arc_ptr_alloc::<WindowOwner>(WindowOwner { handle = PtrMut<ResinWindow>(u64(0)) })?;
 	runtime_status_from_code(resin_window_create(width, height, title:get().data, &owner:get().handle))?;
 	(Window { owner = owner })
 }

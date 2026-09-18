@@ -38,12 +38,12 @@ fn explicit_holes_are_not_editor_recovery_holes() {
 fn holes_compose_inside_pointers_spans_records_and_functions() {
     let m = module(
         r#"struct FieldsPointerNumberFlag<T0, T1, T2> { pointer: T0, number: T1, flag: T2, }
-        struct Span<T> { data: Ptr<T>, length: u64, }
-        fn pointer(p: Ptr<Ptr<i32>>) -> Ptr<Ptr<_>>  { p }
-        fn span(p: Span<Ptr<i32>>) -> Span<Ptr<_>>  { p }
+        struct SpanMut<T> { data: PtrMut<T>, length: u64, }
+        fn pointer(p: PtrMut<PtrMut<i32>>) -> PtrMut<PtrMut<_>>  { p }
+        fn span(p: SpanMut<PtrMut<i32>>) -> SpanMut<PtrMut<_>>  { p }
         fn plus(n: i32) -> i32  { n + 1 }
         fn function() -> (i32) -> _  { plus }
-        fn record(p: Ptr<i32>) -> FieldsPointerNumberFlag<Ptr<_>, _, _>  {
+        fn record(p: PtrMut<i32>) -> FieldsPointerNumberFlag<PtrMut<_>, _, _>  {
             FieldsPointerNumberFlag<_, _, _> { flag = true, number = 7, pointer = p }
         }
         "#,
@@ -184,16 +184,16 @@ fn nominal_identity_and_local_type_definitions_survive_inference() {
 #[test]
 fn ambiguous_infinite_and_forbidden_holes_are_diagnostics() {
     for source in [
-        "fn main()  { let mut p: Ptr<_>; }",
-        "fn main()  { let mut p = Ptr<_>(u64(0)); }",
+        "fn main()  { let mut p: PtrMut<_>; }",
+        "fn main()  { let mut p = PtrMut<_>(u64(0)); }",
     ] {
         rejects(source, "cannot infer");
     }
     rejects("fn main()  { let mut p: _; p = &p; }", "infinite type");
     for source in [
         "fn f(x: _)  {}",
-        "fn f(x: Ptr<_>)  {}",
-        "type Foo = Ptr<_>;",
+        "fn f(x: PtrMut<_>)  {}",
+        "type Foo = PtrMut<_>;",
         "struct Foo { value: _, }",
         "extern { \"api.h\": { fn f() -> _; } };",
         "fn main() -> _  { type Foo = _; () }",
@@ -236,7 +236,7 @@ fn distinct_nodes_with_identical_spans_do_not_share_inference_variables() {
 fn span_construction_and_indexing_infer_element_value_types() {
     assert_eq!(
         result(
-            "import { \"$/span.resin\" }; fn get(p: Ptr<i32>) -> _  { let mut s = Span<_> { data = p, length = u64(1) }; s:at(0) }",
+            "import { \"$/span.resin\" }; fn get(p: PtrMut<i32>) -> _  { let mut s = SpanMut<_> { data = p, length = u64(1) }; s:at(0) }",
             "get"
         ),
         Ty::Int32
@@ -247,13 +247,14 @@ fn span_construction_and_indexing_infer_element_value_types() {
     );
     assert_eq!(
         result(
-            "@compute_shader fn kernel(invocation: u64, output: Ptr<u32>) -> _  { let mut i = u32(invocation); output.* = { i }; } fn reference() -> _  { kernel }",
+            "@compute_shader fn kernel(invocation: u64, output: PtrMut<u32>) -> _  { let mut i = u32(invocation); output.* = { i }; } fn reference() -> _  { kernel }",
             "reference"
         ),
         Ty::Function {
             params: vec![
                 Ty::UInt64,
                 Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(Ty::UInt32)
                 }
             ],
@@ -390,9 +391,9 @@ fn checking_does_not_depend_on_inference_trigger_syntax() {
 #[test]
 fn pointer_reinterpretation_does_not_narrow_source_storage() {
     for bindings in [
-        "let mut n = Ptr<i64>(u64(300)); let mut bytes = Ptr<u8>(n);",
-        "let mut n: _; n = Ptr<i64>(u64(300)); let mut bytes = Ptr<u8>(n);",
-        "let mut n: Ptr<i32>; n = Ptr<i32>(u64(300)); let mut source: Ptr<i32>; source = n; let mut bytes = Ptr<u8>(source);",
+        "let mut n = PtrMut<i64>(u64(300)); let mut bytes = PtrMut<u8>(n);",
+        "let mut n: _; n = PtrMut<i64>(u64(300)); let mut bytes = PtrMut<u8>(n);",
+        "let mut n: PtrMut<i32>; n = PtrMut<i32>(u64(300)); let mut source: PtrMut<i32>; source = n; let mut bytes = PtrMut<u8>(source);",
     ] {
         for marker in ["", "{ let mut unused = (); };"] {
             let source = format!("export {{ main }}; fn main()  {{ {bindings} {marker} }}");
@@ -406,7 +407,8 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
             assert_eq!(
                 n.ty,
                 Ty::Pointer {
-                    pointee: Box::new(if bindings.contains("let mut n: Ptr<i32>") {
+                    mutable: true,
+                    pointee: Box::new(if bindings.contains("let mut n: PtrMut<i32>") {
                         Ty::Int32
                     } else {
                         Ty::Int64
@@ -423,6 +425,7 @@ fn pointer_reinterpretation_does_not_narrow_source_storage() {
             assert_eq!(
                 bytes.ty,
                 Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(Ty::UInt8)
                 },
                 "{source}"
@@ -439,7 +442,10 @@ fn shared_layout_queries_reject_unsupported_or_unresolved_types() {
             "no shared host/device layout",
         );
     }
-    rejects("fn main()  { size_of(Ptr<_>); }", "holes are only allowed");
+    rejects(
+        "fn main()  { size_of(PtrMut<_>); }",
+        "holes are only allowed",
+    );
 }
 
 #[test]
@@ -532,7 +538,7 @@ fn layout_operands_do_not_read_or_initialize_runtime_locals() {
 fn nested_record_annotations_reject_duplicate_field_names() {
     for source in [
         "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f(x: FieldsNN<i32, i32>)  {}",
-        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { let mut x: Ptr<FieldsNN<i32, i32>>; }",
+        "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { let mut x: PtrMut<FieldsNN<i32, i32>>; }",
         "fn f()  { struct Local { n: i32, n: i32, } }",
         "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { type Local = FieldsNN<i32, i32>; }",
         "struct FieldsNN<T0, T1> { n: T0, n: T1, }\nfn f()  { { let mut x: FieldsNN<i32, i32>; }; }",

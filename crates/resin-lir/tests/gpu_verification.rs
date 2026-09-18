@@ -117,6 +117,7 @@ fn opaque_gpu_views_do_not_support_ordinary_load_or_raw_pointer_permissions() {
     let ordinary = module(Ty::GpuView, Ty::UInt32, vec![Instr::Load]);
     assert!(resin_lir::verify(&ordinary).is_err());
     let raw = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::UInt32),
     };
     let restricted = module(
@@ -130,4 +131,34 @@ fn opaque_gpu_views_do_not_support_ordinary_load_or_raw_pointer_permissions() {
         ],
     );
     assert!(resin_lir::verify(&restricted).is_err());
+}
+
+#[test]
+fn gpu_readback_requires_a_writable_host_destination() {
+    for mutable in [false, true] {
+        let pointer = Ty::Pointer {
+            mutable,
+            pointee: Box::new(Ty::UInt32),
+        };
+        let mut module = module(
+            Ty::GpuView,
+            Ty::Unit,
+            vec![
+                uint(1),
+                Instr::TakeLocal {
+                    local: LocalId::from_index(1),
+                },
+                uint(1),
+                Instr::GpuViewCopyTo,
+            ],
+        );
+        module.functions[0].parameter_count = 2;
+        module.functions[0].locals.push(Local {
+            name: None,
+            ty: pointer,
+        });
+        assert_eq!(resin_lir::verify(&module).is_ok(), mutable);
+        *module.functions[0].blocks[0].instrs.last_mut().unwrap() = Instr::GpuViewCopyFrom;
+        resin_lir::verify(&module).unwrap();
+    }
 }

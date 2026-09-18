@@ -134,7 +134,7 @@ pub(crate) unsafe fn allocate(
 
 unsafe fn allocation_owner<'a>(value: ResinGpuPtr) -> Result<&'a AllocationOwner, &'static str> {
     if value.owner.is_null() {
-        return Err("access through an empty GpuPtr");
+        return Err("access through an empty GPU view");
     }
     Ok(unsafe { &*resin_arc_data(value.owner).cast::<AllocationOwner>() })
 }
@@ -285,15 +285,14 @@ unsafe fn checked_device_pointer(
     bytes: usize,
     alignment: usize,
     gpu: *mut ResinGpu,
+    access: u32,
 ) -> Result<u64, &'static str> {
     let owner = unsafe { allocation_owner(value) }?;
     if owner.gpu != gpu {
         return Err("GPU pointer belongs to a different device");
     }
     check_range(value.offset, bytes, owner.bytes)?;
-    // Ordinary shader Ptr permits both reads and writes. Narrowed host views
-    // cannot be projected until shader access qualifiers exist.
-    check_access(value.access, RESIN_GPU_ACCESS_READ | RESIN_GPU_ACCESS_WRITE)?;
+    check_access(value.access, access)?;
     let address = owner
         .allocation
         .device_pointer()
@@ -308,9 +307,10 @@ unsafe fn checked_projection_pointer(
     value: ResinGpuPtr,
     bytes: usize,
     alignment: usize,
+    access: u32,
 ) -> Result<u64, &'static str> {
     let gpu = unsafe { allocation_owner(projection.root) }?.gpu;
-    let address = unsafe { checked_device_pointer(value, bytes, alignment, gpu) }?;
+    let address = unsafe { checked_device_pointer(value, bytes, alignment, gpu, access) }?;
     if value.owner != projection.root.owner && !projection.dependencies.contains(&value.owner) {
         unsafe { resin_arc_retain(value.owner) };
         projection.dependencies.push(value.owner);
@@ -323,9 +323,18 @@ pub(crate) unsafe fn projection_pointer(
     value: ResinGpuPtr,
     bytes: usize,
     alignment: usize,
+    access: u32,
 ) -> u64 {
-    unsafe { checked_projection_pointer(projection_owner(projection), value, bytes, alignment) }
-        .unwrap_or_else(|message| crate::host::fail(message))
+    unsafe {
+        checked_projection_pointer(
+            projection_owner(projection),
+            value,
+            bytes,
+            alignment,
+            access,
+        )
+    }
+    .unwrap_or_else(|message| crate::host::fail(message))
 }
 
 unsafe fn projected_root(
@@ -655,10 +664,10 @@ void main() { Value(Root(root).destination).number += 1; }
                 .write(0);
             let root = gpu.allocate(8, ResinMemory::Default);
             let projection = projection_new(root);
-            let address = projection_pointer(projection, value, 4, 4);
-            let base_address = checked_device_pointer(allocation, 16, 8, gpu.gpu).unwrap();
+            let address = projection_pointer(projection, value, 4, 4, 3);
+            let base_address = checked_device_pointer(allocation, 16, 8, gpu.gpu, 3).unwrap();
             assert_eq!(address, base_address + 8);
-            assert_eq!(projection_pointer(projection, value, 4, 4), address);
+            assert_eq!(projection_pointer(projection, value, 4, 4, 3), address);
             assert_eq!(projection_owner(projection).dependencies.len(), 1);
             projection_root(projection).cast::<u64>().write(address);
             resin_arc_release(root.owner);
@@ -728,9 +737,9 @@ void main() { Value(Root(root).destination).number += 1; }
             let projection = projection_new(root);
             let value = gpu.allocate(16, ResinMemory::Default);
             let payload = projection_owner(projection);
-            assert!(checked_projection_pointer(payload, value, 17, 1).is_err());
+            assert!(checked_projection_pointer(payload, value, 17, 1, 3).is_err());
             assert!(
-                checked_projection_pointer(payload, ResinGpuPtr { offset: 1, ..value }, 8, 8)
+                checked_projection_pointer(payload, ResinGpuPtr { offset: 1, ..value }, 8, 8, 3)
                     .is_err()
             );
             assert!(
@@ -741,11 +750,12 @@ void main() { Value(Root(root).destination).number += 1; }
                         ..value
                     },
                     8,
-                    8
+                    8,
+                    3
                 )
                 .is_err()
             );
-            assert!(checked_device_pointer(value, 8, 8, ptr::null_mut()).is_err());
+            assert!(checked_device_pointer(value, 8, 8, ptr::null_mut(), 3).is_err());
             assert!(payload.dependencies.is_empty());
             assert!(checked_host(value, 8, 8, RESIN_GPU_ACCESS_READ).is_ok());
             resin_arc_release(projection);

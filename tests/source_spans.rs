@@ -29,7 +29,7 @@ fn run(source: &str) -> std::process::Output {
         .run()
 }
 
-const INDEX: &str = r#"intrinsic "pointer_index" fn index<T>(data: Ptr<T>, length: u64, position: u64) -> Ptr<T>;
+const INDEX: &str = r#"intrinsic "pointer_index_mut" fn index<T>(data: PtrMut<T>, length: u64, position: u64) -> PtrMut<T>;
 "#;
 
 #[test]
@@ -68,7 +68,7 @@ fn source_methods_preserve_element_stride_aliasing_and_explicit_literal_borrows(
         import { "$/shared.resin", "$/span.resin" };
         fn main() -> i32 | Err<_> {
             let values_owner = arc_ptr_alloc([u64(3), u64(7), u64(11)])?; let values: Ref<_> = values_owner:get().*;
-            let mut view = Span<u64> { data = values_owner:get():lea(0), length = u64(3) };
+            let mut view = SpanMut<u64> { data = values_owner:get():lea(0), length = u64(3) };
             let mut alias = view:slice(1, 2);
             alias:at_mut(0) = u64(42);
             let mut raw = alias:as_bytes();
@@ -90,9 +90,9 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
         import { "$/shared.resin", "$/span.resin" };
         fn main() -> i32 | Err<_> {
             let values_owner = arc_ptr_alloc([u32(1), u32(2)])?; let values: Ref<_> = values_owner:get().*;
-            let mut view = Span<u32> { data = values_owner:get():lea(0), length = u64(2) };
+            let mut view = SpanMut<u32> { data = values_owner:get():lea(0), length = u64(2) };
             let mut end = view:slice(2, 0);
-            let mut empty = { let borrowed = Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0) }; borrowed:slice(0, 0) };
+            let mut empty = { let borrowed = SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) }; borrowed:slice(0, 0) };
             if (end.length == u64(0) && u64(end.data) == u64(view.data) + u64(2) * size_of(u32)
                 && empty.length == u64(0) && u64(empty.data) == u64(0)) { 0 } else { 1 }
         }
@@ -108,7 +108,7 @@ fn empty_slices_allow_one_past_the_end_without_advancing_null() {
 fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
     for (storage, cases) in [
         (
-            "let values = arc_ptr_alloc([u64(1), u64(2), u64(3)])?; let mut view = Span<u64> { data = values:get():lea(0), length = u64(3) };",
+            "let values = arc_ptr_alloc([u64(1), u64(2), u64(3)])?; let mut view = SpanMut<u64> { data = values:get():lea(0), length = u64(3) };",
             [
                 ("view:at(3)", "index"),
                 ("view:slice(2, 2)", "slice out of bounds"),
@@ -117,13 +117,13 @@ fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
                     "slice out of bounds",
                 ),
                 (
-                    "let huge = Span<u64> { data = Ptr<u64>(u64(0)), length = u64(0xffffffffffffffff) }; huge:as_bytes()",
+                    "let huge = SpanMut<u64> { data = PtrMut<u64>(u64(0)), length = u64(0xffffffffffffffff) }; huge:as_bytes()",
                     "byte length overflow",
                 ),
             ],
         ),
         (
-            "let mut view = Span<u32> { data = Ptr<u32>(u64(0)), length = u64(2) };",
+            "let mut view = SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(2) };",
             [
                 ("view:slice(3, 0)", "span slice out of bounds"),
                 ("view:slice(1, 2)", "span slice out of bounds"),
@@ -132,7 +132,7 @@ fn primitive_boundaries_report_invalid_ranges_indices_and_byte_counts() {
                     "span slice out of bounds",
                 ),
                 (
-                    "let huge = Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0xffffffffffffffff) }; huge:as_bytes()",
+                    "let huge = SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0xffffffffffffffff) }; huge:as_bytes()",
                     "span byte length overflow",
                 ),
             ],
@@ -167,7 +167,7 @@ fn byte_views_reject_nonnumeric_elements_after_specialization() {
         struct Entry { value: u32, }
         fn main() -> () | Err<_> {
             let entry_owner = arc_ptr_alloc(Entry { value = u32(1) })?; let entry: Ref<_> = entry_owner:get().*;
-            { let borrowed = Span<Entry> { data = entry_owner:get(), length = u64(1) }; borrowed:as_bytes() };
+            { let borrowed = SpanMut<Entry> { data = entry_owner:get(), length = u64(1) }; borrowed:as_bytes() };
         }
     "#,
         "main",
@@ -190,8 +190,8 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
     let compilation = compile(
         r#"export { kernel };
         import { "$/span.resin" };
-        struct Root { values: Span<u32>, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
+        struct Root { values: SpanMut<u32>, }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {
             root.values:at_mut(index) = u32(42);
         }
     "#,
@@ -209,8 +209,8 @@ fn shader_span_indexing_uses_record_layout_and_device_pointer_stride() {
 fn shader_local_addresses_cannot_become_physical_pointer_index_operands() {
     let compilation = compile(
         r#"export { kernel };
-        intrinsic "pointer_index" fn index<T>(data: Ptr<T>, length: u64, position: u64) -> Ptr<T>;
-        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  {
+        intrinsic "pointer_index_mut" fn index<T>(data: PtrMut<T>, length: u64, position: u64) -> PtrMut<T>;
+        @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  {
             let mut values = [u32(1), u32(2)];
             output.* = index(&values:at(0), 2, 0).*;
         }
@@ -233,10 +233,10 @@ fn reference_returning_index_wrappers_preserve_nested_places() {
     import { "$/shared.resin", "$/span.resin" };
     struct Payload { value: i32, }
     struct Entry { nested: Payload, }
-    fn entry_at(items: Ref<Span<Entry>>, index: u64) -> RefMut<Entry>  { items:at_mut(index) }
+    fn entry_at(items: Ref<SpanMut<Entry>>, index: u64) -> RefMut<Entry>  { items:at_mut(index) }
     fn main() -> i32 | Err<_> {
         let items_owner = arc_ptr_alloc([Entry { nested = Payload { value = 1 } }, Entry { nested = Payload { value = 2 } }])?; let items: Ref<_> = items_owner:get().*;
-        let mut span = Span<Entry> { data = Ptr<Entry>(items_owner:get()), length = u64(2) };
+        let mut span = SpanMut<Entry> { data = PtrMut<Entry>(items_owner:get()), length = u64(2) };
         entry_at(span, u64(1)).nested.value = 42;
         let p: RefMut<i32> = entry_at(span, u64(1)).nested.value;
         p = p + 1;
@@ -260,7 +260,7 @@ fn opaque_native_elements_cannot_be_indexed_or_sliced() {
             import {{ "$/span.resin" }};
             extern type NativeHandle;
             fn main()  {{
-                let mut view = Span<NativeHandle> {{ data = Ptr<NativeHandle>(u64(0)), length = u64(1) }};
+                let mut view = SpanMut<NativeHandle> {{ data = PtrMut<NativeHandle>(u64(0)), length = u64(1) }};
                 {operation};
             }}
         "#

@@ -12,8 +12,8 @@ struct Output {
 }
 struct Root {
 	count: u64,
-	inputs: Ptr<Input>,
-	outputs: Ptr<Output>,
+	inputs: PtrMut<Input>,
+	outputs: PtrMut<Output>,
 }
 
 fn convert(input: Ref<Input>) -> u64 {
@@ -49,14 +49,14 @@ fn convert(input: Ref<Input>) -> u64 {
 	}
 }
 
-fn ready(input: Ref<Input>, progress: Ptr<u32>) -> bool {
+fn ready(input: Ref<Input>, progress: PtrMut<u32>) -> bool {
 	progress.* = u32(2);
 	convert(input);
 	progress.* = u32(3);
 	u32(1) == u32(1)
 }
 
-fn in_loop(input: Ref<Input>, progress: Ptr<u32>) -> u64 {
+fn in_loop(input: Ref<Input>, progress: PtrMut<u32>) -> u64 {
 	let mut step: u32 = 0;
 	let mut result: u64 = 0;
 	while (step < u32(1) && ready(input, progress)) {
@@ -67,10 +67,10 @@ fn in_loop(input: Ref<Input>, progress: Ptr<u32>) -> u64 {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(index: u64, root: PtrMut<Root>) {
 	if (index < root.count) {
-		let mut inputs = Span<Input> { data = root.inputs, length = root.count };
-		let mut outputs = Span<Output> { data = root.outputs, length = root.count };
+		let mut inputs = SpanMut<Input> { data = root.inputs, length = root.count };
+		let mut outputs = SpanMut<Output> { data = root.outputs, length = root.count };
 		let output = outputs:lea(index);
 		output.progress = u32(1);
 		let mut value = in_loop(fixture_index(inputs.data, inputs.length, index).*, &output.progress);
@@ -79,4 +79,4 @@ fn kernel(index: u64, root: Ptr<Root>) {
 	};
 }
 
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_index_mut" fn fixture_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;

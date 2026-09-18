@@ -7,7 +7,7 @@ use support::toolchain;
 #[test]
 fn a_loop_with_an_always_returning_body_has_a_valid_continue_target() {
     let mut module = support::module(
-        "export { kernel };\n        fn helper(x: u32) -> u32 { x }\n        @compute_shader fn kernel(i: u64, output: Ptr<u32>) {\n            output.* = helper(u32(i));\n        }",
+        "export { kernel };\n        fn helper(x: u32) -> u32 { x }\n        @compute_shader fn kernel(i: u64, output: PtrMut<u32>) {\n            output.* = helper(u32(i));\n        }",
     );
     let helper = module
         .functions
@@ -69,7 +69,7 @@ fn elimination_ends_loop_conditions_and_selection_continuations() {
     ];
     for condition in conditions {
         let module = support::module(&format!(
-            "export {{ kernel }};\n            @compute_shader fn kernel(i: u64, output: Ptr<u32>) {{\n                while ({condition}) {{ output.* = u32(1); }};\n                output.* = u32(2);\n            }}"
+            "export {{ kernel }};\n            @compute_shader fn kernel(i: u64, output: PtrMut<u32>) {{\n                while ({condition}) {{ output.* = u32(1); }};\n                output.* = u32(2);\n            }}"
         ));
         let project = support::project::Project::new(&module, None).unwrap();
         for shader in project.generated.shaders() {

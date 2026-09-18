@@ -146,6 +146,7 @@ impl FunctionLowering<'_> {
                     });
                 }
                 Conv::Deref => self.emit(Instr::Load),
+                Conv::ReadOnly => self.emit(Instr::ReadOnly),
                 Conv::WrapError | Conv::UnwrapError | Conv::ViewRecord => {
                     unreachable!("view conversions require a target type")
                 }

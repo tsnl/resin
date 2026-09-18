@@ -41,7 +41,7 @@ fn complex_value_arithmetic_composes_and_preserves_float_width() {
 fn complex_arithmetic_accepts_device_storage_in_shaders() {
     let module = support::module(
         r#"export { kernel }; import { "$/math.resin" };
-        @compute_shader fn kernel(index: u64, value: Ptr<Complex<f32>>) {
+        @compute_shader fn kernel(index: u64, value: PtrMut<Complex<f32>>) {
             let norm = value.*:magnitude_squared();
             let square = value.*:squared();
             value.real = square.real + norm;
@@ -92,7 +92,7 @@ fn math_rejects_non_float_arguments_during_specialization() {
 fn shader_math_emits_glsl_operations() {
     let module = support::module(
         r#"export { kernel }; import { "$/math.resin" };
-        @compute_shader fn kernel(index: u64, value: Ptr<f32>)  {
+        @compute_shader fn kernel(index: u64, value: PtrMut<f32>)  {
             value.* = sqrt(value.*) + sin(value.*) + cos(value.*);
         }"#,
     );

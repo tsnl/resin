@@ -471,7 +471,11 @@ impl TypeNames {
                 self.format(referent)
             ),
             Type::Value { of } => format!("Value<{}>", self.format(of)),
-            Type::Pointer { pointee } => format!("Ptr<{}>", self.format(pointee)),
+            Type::Pointer { pointee, mutable } => format!(
+                "{}<{}>",
+                if *mutable { "PtrMut" } else { "Ptr" },
+                self.format(pointee)
+            ),
             Type::GpuView => "GpuView".into(),
             Type::GpuPipelineContract => "GpuPipelineContract".into(),
             Type::GpuArguments => "GpuArguments".into(),

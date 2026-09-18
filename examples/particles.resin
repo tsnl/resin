@@ -36,7 +36,7 @@ struct Params {
 	zoom: f32,
 	aspect: f32,
 	radius: f32,
-	particles: Span<Particle>,
+	particles: SpanMut<Particle>,
 }
 
 struct HostParams {
@@ -48,7 +48,7 @@ struct HostParams {
 	zoom: f32,
 	aspect: f32,
 	radius: f32,
-	particles: GpuSpan<Particle>,
+	particles: GpuSpanMut<Particle>,
 }
 
 // Relax the initial random velocities toward the Lorenz attractor's flow.
@@ -68,7 +68,7 @@ fn advance(p: Particle, dt: f32) -> Particle {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Params>) -> () {
+fn kernel(index: u64, root: PtrMut<Params>) -> () {
 	if (index < root.particles.length) {
 		let p: RefMut<Particle> = root.particles:at_mut(index);
 		p = advance(advance(p:clone(), root.dt), root.dt);
@@ -165,7 +165,7 @@ fn heat_color(heat: f32) -> Color {
 }
 
 @vertex_shader
-fn vertex(index: i32, root: Ptr<Params>) -> Vertex {
+fn vertex(index: i32, root: PtrMut<Params>) -> Vertex {
 	let mut particle = particle_index(index);
 	let mut local = index - particle * 24;
 	let mut sector = i32(f32(local) / f32(3.0));
@@ -258,7 +258,7 @@ fn random_particle(state: RefMut<u32>) -> Particle {
 	}
 }
 
-fn initialize(particles: Ref<GpuSpan<Particle>>, seed: u32) {
+fn initialize(particles: Ref<GpuSpanMut<Particle>>, seed: u32) {
 	let mut state = seed | u32(1);
 	let mut index: u64 = 0;
 	while (index < particles.length) {

@@ -429,7 +429,7 @@ fn transfer(types: &Types<'_>, target: usize, stack: &[Slot]) -> String {
 }
 
 fn tracks_initialization(types: &Types<'_>, ty: &Ty) -> bool {
-    matches!(ty, Ty::Pointer { pointee } | Ty::Reference { referent: pointee, .. } if pointee.needs_drop(&types.module.types))
+    matches!(ty, Ty::Pointer { pointee, .. } | Ty::Reference { referent: pointee, .. } if pointee.needs_drop(&types.module.types))
 }
 
 fn instruction(
@@ -557,7 +557,7 @@ fn instruction(
             widen(types, &args[0].ty, result.unwrap(), &args[0].expr)
         }
         Instr::IsVariant { tag } => {
-            let (ty, expr) = if let Ty::Pointer { pointee }
+            let (ty, expr) = if let Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             } = &args[0].ty
@@ -812,7 +812,7 @@ fn widen(types: &Types<'_>, from: &Ty, to: &Ty, value: &str) -> String {
 fn project(types: &Types<'_>, source: &Slot, index: &str, dynamic: bool) -> Result<String, Error> {
     let mut ty = types.shape(&source.ty);
     let mut expr = types.unwrap(&source.ty, source.expr.clone());
-    let pointer = if let Ty::Pointer { pointee }
+    let pointer = if let Ty::Pointer { pointee, .. }
     | Ty::Reference {
         referent: pointee, ..
     } = ty
@@ -914,7 +914,7 @@ fn pointer_range(args: &[Slot], out: &mut String) -> String {
 }
 
 fn pointer_bytes(types: &Types<'_>, args: &[Slot], result: &Ty, out: &mut String) -> String {
-    let Ty::Pointer { pointee } = &args[0].ty else {
+    let Ty::Pointer { pointee, .. } = &args[0].ty else {
         unreachable!("verified numeric pointer")
     };
     let stride = format!("sizeof({})", types.name(pointee));

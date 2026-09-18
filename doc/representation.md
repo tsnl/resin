@@ -32,7 +32,7 @@ booleans, function values, and other types outside the shared profile are reject
 Use `gpu:create(value)?` to allocate and initialize one GPU element, with its type
 inferred from the value or result context. `gpu:alloc::<T>(count)?` allocates
 uninitialized elements and checks the multiplication of count by element size.
-The byte allocator `gpu:alloc_in::<u8>(bytes, memory)?` returns `GpuSpan<u8>`.
+The byte allocator `gpu:alloc_in::<u8>(bytes, memory)?` returns `GpuSpanMut<u8>`.
 
 ### Explicit numeric conversions
 

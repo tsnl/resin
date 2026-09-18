@@ -49,7 +49,7 @@ to those modules. Public operations are exported free functions, including const
 - `$/status.resin`: Native status conversion functions and the `RuntimeError` union and its variants.
 - `$/graphics.resin`: shared `Position`, `Color`, and `Vertex` types.
 - `$/stdio.resin`: `io_stdout():write(text)` and `io_stderr():write(text)`.
-- `$/span.resin`: borrowed `Span<T>` and `bytes(text)` for literal byte views.
+- `$/span.resin`: borrowed `Span<T>` / `SpanMut<T>` and `bytes(text)` for literal byte views.
 - `$/shared.resin`: `arc_ptr_alloc::<T>(initial)?`, `arc_span_alloc::<T>(count, initial)?`, and weak owners.
 - `$/string.resin`: owned `String`, `string_from_str`, `string_from_bytes`, `fmt`, and `print`.
 - `$/stdio.resin`: `console_read_byte()`, `console_read_line()`, and shared `InputLine` owners with `console_print(line)`.

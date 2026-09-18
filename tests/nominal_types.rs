@@ -29,6 +29,7 @@ fn linked_list_type() -> TypeDef {
                 RecordField {
                     name: "next".into(),
                     ty: Ty::Pointer {
+                        mutable: true,
                         pointee: Box::new(list),
                     },
                 },
@@ -39,7 +40,7 @@ fn linked_list_type() -> TypeDef {
 
 #[test]
 fn uppercase_definitions_remain_distinct_in_the_ast() {
-    let file = parse("struct List { value: i32, next: Ptr<List>, }");
+    let file = parse("struct List { value: i32, next: PtrMut<List>, }");
     let StmtKind::Struct {
         name, body: init, ..
     } = &file.stmts[0].val

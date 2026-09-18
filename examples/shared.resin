@@ -5,7 +5,7 @@ import { "$/shared.resin", "$/string.resin", "$/stdio.resin" };
 struct Tracked {
 	value: i32,
 }
-fn read(self: Ptr<Tracked>) -> i32 {
+fn read(self: PtrMut<Tracked>) -> i32 {
 	self.value
 }
 

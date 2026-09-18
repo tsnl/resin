@@ -47,7 +47,7 @@ fn reference_arguments_borrow_named_owners_until_scope_exit() {
         export { main };
 import { "$/shared.resin" };
 
-        struct Item { trace: Ptr<i32>, digit: i32 }
+        struct Item { trace: PtrMut<i32>, digit: i32 }
         fn drop(value: RefMut<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
         fn borrow<T>(value: Ref<T>) -> Ref<T> { value }
         fn digit(value: Ref<Item>) -> i32 { assert(value.trace.* == 0); value.digit }
@@ -61,7 +61,7 @@ import { "$/shared.resin" };
             iteration <= 2
         }
         fn fail() -> i32 | Err<None> { Err(None) }
-        fn early(trace: Ptr<i32>) -> i32 | Err<None> {
+        fn early(trace: PtrMut<i32>) -> i32 | Err<None> {
             let first = Item { trace = trace, digit = 3 };
             let second = Item { trace = trace, digit = fail()? };
             observe(first, second)
@@ -114,7 +114,7 @@ fn arc_allocation_moves_payloads_and_explicit_clones_keep_them_alive() {
     let source = r#"
         export { main };
         import { "$/shared.resin", "$/status.resin" };
-        struct Item { trace: Ptr<i32>, value: i32 }
+        struct Item { trace: PtrMut<i32>, value: i32 }
         fn drop(value: RefMut<Item>) { value.trace.* = value.trace.* + 1; }
         fn main() -> i32 | Err<OutOfMemory> {
             let trace_owner = arc_ptr_alloc(0)?; let trace: Ref<i32> = trace_owner:get().*;
@@ -170,7 +170,7 @@ fn moves_and_partial_replacements_destroy_each_value_once() {
     let source = r#"export { main };
 import { "$/shared.resin" };
 
-        struct Item { trace: Ptr<i32>, digit: i32,
+        struct Item { trace: PtrMut<i32>, digit: i32,
             
         }
 fn drop(value: RefMut<Item>) { value.trace.* = value.trace.* * 10 + value.digit; }
@@ -204,7 +204,7 @@ fn returned_error_payloads_keep_exactly_one_owner() {
     let source = r#"export { main };
 import { "$/shared.resin" };
 
-        struct Item { trace: Ptr<i32>, }
+        struct Item { trace: PtrMut<i32>, }
         fn drop(value: RefMut<Item>) { value.trace.* = value.trace.* + 1; }
         fn route(value: Item, failed: bool) -> Item | Err<Item> {
             if (failed) { return Err(value); };

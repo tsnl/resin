@@ -2,7 +2,7 @@ export { main };
 
 import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
 
-fn set(p: Ptr<i32>) -> i32 {
+fn set(p: PtrMut<i32>) -> i32 {
 	p.* = 1;
 	p.*
 }
@@ -12,11 +12,11 @@ struct Point {
 	y: i32,
 }
 
-fn get_x(p: Ptr<Point>) -> i32 {
+fn get_x(p: PtrMut<Point>) -> i32 {
 	p.x
 }
 
-fn set_x(p: Ptr<Point>, n: i32) -> i32 {
+fn set_x(p: PtrMut<Point>, n: i32) -> i32 {
 	p.x = n;
 	p.x
 }

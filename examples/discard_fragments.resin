@@ -39,7 +39,7 @@ fn background(uv: Color) -> Color {
 
 // Store an 8 x 8 alpha image in a byte buffer. This example samples it manually
 // with nearest-neighbor lookup; Resin does not expose sampled-image objects yet.
-// The host owns a GpuSpan<u8>; recording projects it to a shader Span<u8> and
+// The host owns a GpuSpanMut<u8>; recording projects it to a shader SpanMut<u8> and
 // retains its allocation until submission finishes.
 struct Mask<Alpha> {
 	alpha: Alpha,
@@ -47,7 +47,7 @@ struct Mask<Alpha> {
 }
 
 @fragment_shader
-fn masked(uv: Color, mask: Ptr<Mask<Span<u8>>>) -> Color | None {
+fn masked(uv: Color, mask: PtrMut<Mask<SpanMut<u8>>>) -> Color | None {
 	let x = u64(uv.r * 8);
 	let y = u64(uv.g * 8);
 	let alpha = f32(mask.alpha:at(y * 8 + x)) / 255;
@@ -88,7 +88,7 @@ fn main() -> () | Err<_> {
 	let commands = gpu:start_command_recording()?;
 	commands:begin_rendering(image, 0, 0, 0, 1)?;
 	commands:draw(opaque, None, 3)?;
-	commands:draw(cutout, Mask<GpuSpan<u8>> { alpha = alpha, cutoff = 0.5 }, 3)?;
+	commands:draw(cutout, Mask<GpuSpanMut<u8>> { alpha = alpha, cutoff = 0.5 }, 3)?;
 	commands:end_rendering()?;
 	commands:copy_image_to_buffer(image, pixels)?;
 	commands:submit()?;
@@ -97,6 +97,6 @@ fn main() -> () | Err<_> {
 	let host = arc_span_alloc::<u8>(pixels.length, u8(0))?;
 	pixels:copy_to(host:get());
 	let view = host:get();
-	image_data_write_pixels("discard-fragments.png".data, 512, 512, 4, view, 0)?;
+	image_data_write_pixels("discard-fragments.png".data, 512, 512, 4, view:read_only(), 0)?;
 	(())
 }

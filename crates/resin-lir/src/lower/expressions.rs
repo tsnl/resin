@@ -221,7 +221,9 @@ impl FunctionLowering<'_> {
                     && !matches!(args.params[0], Ty::Reference { .. })
                 {
                     self.emit(Instr::Borrow);
-                    if matches!(result, Ty::Reference { mutable: false, .. }) {
+                    if matches!(result, Ty::Reference { mutable: false, .. })
+                        && matches!(args.params[0], Ty::Pointer { mutable: true, .. })
+                    {
                         self.emit(Instr::ReadOnly);
                     }
                 }
@@ -240,7 +242,7 @@ impl FunctionLowering<'_> {
                 element: args.params[1].clone(),
             }),
             Intrinsic::OwnerData => {
-                let Ty::Pointer { pointee } = result else {
+                let Ty::Pointer { pointee, .. } = result else {
                     unreachable!("owner payload pointer")
                 };
                 self.emit(Instr::OwnerData {

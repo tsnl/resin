@@ -380,6 +380,7 @@ fn ordinary_and_foreign_parameters_have_separate_locals() {
 #[test]
 fn invalid_nominal_type_expressions_report_errors_before_storage_lowering() {
     let invalid_reference = Type::Pointer {
+        mutable: true,
         pointee: Box::new(Type::Defined {
             arguments: vec![],
             definition: TypeId::from_index(99),

@@ -18,7 +18,7 @@ export { main };
 import { "$/gpu.resin" };
 
 @compute_shader
-fn kernel(index: u64, output: Ptr<u64>) {
+fn kernel(index: u64, output: PtrMut<u64>) {
 	output.* = index;
 }
 fn main() -> (() | Err<_>) {
@@ -57,7 +57,7 @@ the pipeline and projects GPU views internally. Shader entries keep a typed poin
 as their second parameter:
 
 ```resin
-struct Params { values: Span<f32>, scale: f32 }
+struct Params { values: SpanMut<f32>, scale: f32 }
 
 @compute_shader
 fn kernel(index: u64, root: Ptr<Params>) -> ()  {
@@ -117,18 +117,19 @@ also leaves room for future attachment records and a Metal discard implementatio
 
 ### Shader arguments and memory
 
-Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtr<T>`) or
+Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtrMut<T>`) or
 `gpu:alloc::<T>(count)?`. A host launch record replaces shader `Ptr<T>`
-and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values:
+and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values. Writable
+`PtrMut` and `SpanMut` fields require the corresponding `GpuPtrMut` and `GpuSpanMut` views:
 
 ```resin
 let values = gpu:alloc::<f32>(1024)?;
 let mut index: u64 = 0;
 while (index < values.length) {
-    values:at(index):store(f32(1.0));
+    values:store(index, f32(1.0));
     index = index + u64(1);
 };
-struct HostParams { values: GpuSpan<f32>, scale: f32 }
+struct HostParams { values: GpuSpanMut<f32>, scale: f32 }
 let pipeline = gpu:create_compute_pipeline(kernel)?;
 let commands = gpu:start_command_recording()?;
 commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
@@ -155,7 +156,7 @@ and slicing. `load`, `store`, and `replace` access elements on the host.
 access permissions. Host accesses check bounds, alignment, mapping, permissions,
 and pending recorded GPU use. `:copy_from(Span<T>)` uploads a bounded host span into the beginning of a writable,
 host-visible GPU span; its source length must fit the destination.
-`:copy_to(Span<T>)` copies into caller-owned host
+`:copy_to(SpanMut<T>)` copies into caller-owned host
 memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
 projection is the host-to-device address conversion boundary. GPU buffer elements
 must have a shared layout without pointers, spans, owners, or drop hooks.

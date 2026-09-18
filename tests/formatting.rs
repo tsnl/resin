@@ -75,8 +75,8 @@ fn trailing_commas_and_nested_lists() {
 #[test]
 fn compact_lists_and_canonical_spacing() {
     check(
-        "export{main};\n\n\n\nstruct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main ( ) -> ( ) {\n\nlet mut xs = [\n1,\n2\n];\n\n\nlet mut r=FieldsXY<_, _> {x=1,y=2};let mut p=Ptr<Ptr<i32>>( & &xs);let mut x= -(1+2)*3;while(x<2){x=x+1;};if(x>0){x}else{0}\n\n}\n\n",
-        "export { main };\n\nstruct FieldsXY<T0, T1> {\n\tx: T0,\n\ty: T1,\n}\nfn main() -> () {\n\tlet mut xs = [1, 2];\n\n\tlet mut r = FieldsXY<_, _> { x = 1, y = 2 };\n\tlet mut p = Ptr<Ptr<i32>>(& &xs);\n\tlet mut x = -(1 + 2) * 3;\n\twhile (x < 2) {\n\t\tx = x + 1;\n\t};\n\tif (x > 0) {\n\t\tx\n\t} else {\n\t\t0\n\t}\n}\n",
+        "export{main};\n\n\n\nstruct FieldsXY<T0, T1> { x: T0, y: T1, }\nfn main ( ) -> ( ) {\n\nlet mut xs = [\n1,\n2\n];\n\n\nlet mut r=FieldsXY<_, _> {x=1,y=2};let mut p=PtrMut<PtrMut<i32>>( & &xs);let mut x= -(1+2)*3;while(x<2){x=x+1;};if(x>0){x}else{0}\n\n}\n\n",
+        "export { main };\n\nstruct FieldsXY<T0, T1> {\n\tx: T0,\n\ty: T1,\n}\nfn main() -> () {\n\tlet mut xs = [1, 2];\n\n\tlet mut r = FieldsXY<_, _> { x = 1, y = 2 };\n\tlet mut p = PtrMut<PtrMut<i32>>(& &xs);\n\tlet mut x = -(1 + 2) * 3;\n\twhile (x < 2) {\n\t\tx = x + 1;\n\t};\n\tif (x > 0) {\n\t\tx\n\t} else {\n\t\t0\n\t}\n}\n",
     );
 }
 
@@ -95,8 +95,8 @@ fn comments_keep_contents_and_attachment() {
 #[test]
 fn pointer_dereference_stays_attached_to_its_operand() {
     check(
-        "fn f(p:Ptr<i32>){p.* = 1;let mut x=p.*+1;p.*(x);}",
-        "fn f(p: Ptr<i32>) {\n\tp.* = 1;\n\tlet mut x = p.* + 1;\n\tp.*(x);\n}\n",
+        "fn f(p:PtrMut<i32>){p.* = 1;let mut x=p.*+1;p.*(x);}",
+        "fn f(p: PtrMut<i32>) {\n\tp.* = 1;\n\tlet mut x = p.* + 1;\n\tp.*(x);\n}\n",
     );
 }
 
@@ -143,7 +143,7 @@ fn comments_at_every_token_boundary_preserve_syntax() {
             }
         }
     }
-    let source = "export {main}; extern {\"x.h\": {fn ext(x: i32);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0, }\nstruct T {x: Ptr<i32>, y: (i32,),} fn main(a: i32) -> (_ | Err<Never>) { f(); let mut p = & &a; let mut x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x = x + 1; }; match (x) { i32(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } }";
+    let source = "export {main}; extern {\"x.h\": {fn ext(x: i32);}}; import {\"missing.resin\"}; struct FieldsX<T0> { x: T0, }\nstruct T {x: PtrMut<i32>, y: (i32,),} fn main(a: i32) -> (_ | Err<Never>) { f(); let mut p = & &a; let mut x = f([1, 2,], FieldsX<_> {x = 3})?; while (x < 3) { x = x + 1; }; match (x) { i32(v) => { if (v == 3) { v } else { -v } }, Err(e) => { 0 } } }";
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_resin::LANGUAGE.into())
@@ -291,16 +291,16 @@ fn numeric_spelling_is_preserved() {
 #[test]
 fn template_delimiters_and_turbofish_are_attached() {
     check(
-        "fn id <T>(x:T)->T{x}fn main(){let mut f=id:: <Ptr<i32>>;gpu:alloc:: < Pair<i32,i64> >(4);let mut n=2>1;}",
-        "fn id<T>(x: T) -> T {\n\tx\n}\nfn main() {\n\tlet mut f = id::<Ptr<i32>>;\n\tgpu:alloc::<Pair<i32, i64>>(4);\n\tlet mut n = 2 > 1;\n}\n",
+        "fn id <T>(x:T)->T{x}fn main(){let mut f=id:: <PtrMut<i32>>;gpu:alloc:: < Pair<i32,i64> >(4);let mut n=2>1;}",
+        "fn id<T>(x: T) -> T {\n\tx\n}\nfn main() {\n\tlet mut f = id::<PtrMut<i32>>;\n\tgpu:alloc::<Pair<i32, i64>>(4);\n\tlet mut n = 2 > 1;\n}\n",
     );
 }
 
 #[test]
 fn intrinsic_declarations_format_without_semantic_lookup() {
     check(
-        "intrinsic \"pointer_index\" fn at <T>(data:Ptr<T>,length:u64,index:u64)->Ptr<T>;",
-        "intrinsic \"pointer_index\" fn at<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;\n",
+        "intrinsic \"pointer_index_mut\" fn at <T>(data:PtrMut<T>,length:u64,index:u64)->PtrMut<T>;",
+        "intrinsic \"pointer_index_mut\" fn at<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;\n",
     );
 }
 

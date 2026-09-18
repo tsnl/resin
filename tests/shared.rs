@@ -2,7 +2,7 @@ use support::pipeline;
 mod support;
 
 const RESOURCE: &str = r#"import { "$/shared.resin", "$/span.resin" };
-struct Resource { trace: Ptr<i32>, digit: i32,
+struct Resource { trace: PtrMut<i32>, digit: i32,
     
     
     
@@ -13,10 +13,10 @@ fn drop(dying: RefMut<Resource>)  {
 
 fn read(self: Ref<Resource>) -> i32  { self.digit }
 
-fn resource_make(trace: Ptr<i32>, digit: i32) -> Resource  { Resource { trace = trace, digit = digit } }
+fn resource_make(trace: PtrMut<i32>, digit: i32) -> Resource  { Resource { trace = trace, digit = digit } }
 
-fn optional_resource(trace: Ptr<i32>, digit: i32) -> Resource | None  { resource_make(trace, digit) }
-fn shared_resource(trace: Ptr<i32>, digit: i32) -> ArcPtr<Resource>  {
+fn optional_resource(trace: PtrMut<i32>, digit: i32) -> Resource | None  { resource_make(trace, digit) }
+fn shared_resource(trace: PtrMut<i32>, digit: i32) -> ArcPtr<Resource>  {
     let mut optional: ArcPtr<Resource> | None;
     optional = match (arc_ptr_alloc::<Resource>(Resource { trace = trace, digit = 0 })) {
         ArcPtr<Resource>(value) => { value }, Err(error) => { None },
@@ -25,7 +25,7 @@ fn shared_resource(trace: Ptr<i32>, digit: i32) -> ArcPtr<Resource>  {
     owner:get().digit = digit;
     owner
 }
-fn optional_shared(trace: Ptr<i32>, digit: i32) -> ArcPtr<Resource> | None  { shared_resource(trace, digit) }
+fn optional_shared(trace: PtrMut<i32>, digit: i32) -> ArcPtr<Resource> | None  { shared_resource(trace, digit) }
 fn optional_int(value: i32) -> i32 | None  { value }
 
 "#;
@@ -73,7 +73,7 @@ fn main() -> i32 | Err<_> {
 #[test]
 fn assignment_branches_preserve_initialization_and_overwrite_cleanup() {
     run(r#"
-struct Tracked { drops: Ptr<i32>, value: i32,
+struct Tracked { drops: PtrMut<i32>, value: i32,
         
     }
 fn drop(self: RefMut<Tracked>)  { self.drops.* = self.drops.* + 1; }
@@ -120,10 +120,10 @@ fn main() -> i32 | Err<_> {
 fn assignment_propagation_tracks_success_and_error_cleanup() {
     run(r#"
 struct Failed {}
-    fn acquire(trace: Ptr<i32>, fail: bool) -> (ArcPtr<Resource> | Err<Failed>)  {
+    fn acquire(trace: PtrMut<i32>, fail: bool) -> (ArcPtr<Resource> | Err<Failed>)  {
         if (fail) { Err(Failed {}) } else { (shared_resource(trace, 2)) }
     }
-    fn work(trace: Ptr<i32>, fail: bool) -> (() | Err<Failed>)  {
+    fn work(trace: PtrMut<i32>, fail: bool) -> (() | Err<Failed>)  {
         let mut first = shared_resource(trace, 1);
         let mut pending: ArcPtr<Resource>;
         pending = acquire(trace, fail)?;
@@ -141,13 +141,13 @@ struct Failed {}
 #[test]
 fn temporary_projection_keeps_nominal_and_nested_destructors() {
     run(r#"
-struct Outer { trace: Ptr<i32>, inner: ArcPtr<Resource>,
+struct Outer { trace: PtrMut<i32>, inner: ArcPtr<Resource>,
         
     }
 fn drop(self: RefMut<Outer>)  { self.trace.* = self.trace.* * 10 + 2; }
 
 
-    fn make(trace: Ptr<i32>) -> Outer  { Outer { trace = trace, inner = shared_resource(trace, 3) } }
+    fn make(trace: PtrMut<i32>) -> Outer  { Outer { trace = trace, inner = shared_resource(trace, 3) } }
     fn main() -> i32 | Err<_> {
         let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         let mut number = resource_make(trace_owner:get(), 1).digit;
@@ -199,7 +199,7 @@ struct Pair<T> { first: T, second: T, }
     fn ready(fail: bool) -> (() | Err<Failed>)  {
         if (fail) { Err(Failed {}) } else { (()) }
     }
-    fn build<T>(create: (Ptr<i32>, i32) -> T, trace: Ptr<i32>, fail: bool) -> (Pair<T> | Err<Failed>)  {
+    fn build<T>(create: (PtrMut<i32>, i32) -> T, trace: PtrMut<i32>, fail: bool) -> (Pair<T> | Err<Failed>)  {
         (Pair<T> {
             second = create(trace, 2),
             first = {
@@ -267,7 +267,7 @@ struct Shared { value: ArcPtr<Resource>, }
 #[test]
 fn native_wrapper_can_transfer_a_handle_by_disarming_the_source() {
     run(r#"
-fn move(value: Ptr<Resource>) -> Resource  {
+fn move(value: PtrMut<Resource>) -> Resource  {
         Resource { trace = value.trace, digit = (&value.digit):replace(0) }
     }
     fn main() -> i32 | Err<_> {
@@ -290,7 +290,7 @@ fn early_errors_destroy_only_acquired_owners() {
     run(r#"
 struct Failed {}
     fn fail() -> (i32 | Err<Failed>)  { Err(Failed {}) }
-    fn work(trace: Ptr<i32>) -> (Resource | Err<Failed>)  {
+    fn work(trace: PtrMut<i32>) -> (Resource | Err<Failed>)  {
         let mut first = resource_make(trace, 1);
         let mut second = resource_make(trace, 2);
         let mut unused = fail()?;
@@ -350,7 +350,7 @@ fn main() -> i32 | Err<_> {
 #[test]
 fn destruction_preserves_results_and_runs_per_scope_and_iteration() {
     run(r#"
-struct Set { target: Ptr<i32>, value: i32,
+struct Set { target: PtrMut<i32>, value: i32,
         
     }
 fn drop(self: RefMut<Set>)  { self.target.* = self.value; }
@@ -382,7 +382,7 @@ fn drop(self: RefMut<Set>)  { self.target.* = self.value; }
 #[test]
 fn former_defer_keyword_can_name_an_ordinary_immediate_call() {
     run(r#"
-fn defer(trace: Ptr<i32>)  { trace.* = trace.* + 1; }
+fn defer(trace: PtrMut<i32>)  { trace.* = trace.* + 1; }
     fn main() -> i32 | Err<_> {
         let trace_owner = arc_ptr_alloc(0)?; let trace: RefMut<_> = trace_owner:get().*;
         defer(trace_owner:get());
@@ -394,7 +394,7 @@ fn defer(trace: Ptr<i32>)  { trace.* = trace.* + 1; }
 #[test]
 fn weak_cycles_and_nested_pointer_handle_access() {
     run(r#"
-struct Node { trace: Ptr<i32>, live: bool, parent: WeakPtr<Node>,
+struct Node { trace: PtrMut<i32>, live: bool, parent: WeakPtr<Node>,
         
     }
 fn drop(self: RefMut<Node>)  { if (self.live) { self.trace.* = self.trace.* + 1; }; }
@@ -481,7 +481,7 @@ fn main() -> i32 | Err<_> {
 #[test]
 fn destruction_hooks_are_ordinary_calls_and_remain_automatic() {
     run(r#"
-struct Manual { trace: Ptr<i32>, digit: i32,
+struct Manual { trace: PtrMut<i32>, digit: i32,
         
     }
 fn drop(self: RefMut<Manual>)  {
@@ -531,26 +531,26 @@ fn named_single_and_array_owners_keep_borrowed_views_alive_through_error_cleanup
     let source = r#"export { main };
         import { "$/shared.resin", "$/status.resin" };
         struct Stop {}
-        struct Marker { trace: Ptr<i32>, digit: i32,
+        struct Marker { trace: PtrMut<i32>, digit: i32,
             
         }
 fn drop(self: RefMut<Marker>)  {
                 if (self.digit != i32(0)) { self.trace.* = self.trace.* * i32(10) + self.digit; };
             }
 
-        fn single(trace: Ptr<i32>) -> (ArcPtr<Marker> | Err<OutOfMemory>)  {
+        fn single(trace: PtrMut<i32>) -> (ArcPtr<Marker> | Err<OutOfMemory>)  {
             let mut owner = arc_ptr_alloc::<Marker>(Marker { trace = trace, digit = i32(0) })?;
             owner:get().digit = i32(3);
             (owner)
         }
-        fn sequence(trace: Ptr<i32>) -> (_ | Err<OutOfMemory>)  {
+        fn sequence(trace: PtrMut<i32>) -> (_ | Err<OutOfMemory>)  {
             let owner = arc_ptr_alloc([Marker { trace = trace, digit = i32(1) }, Marker { trace = trace, digit = i32(2) }])?;
             (owner)
         }
         fn stop_if(fail: bool) -> (() | Err<Stop>)  {
             if (fail) { Err(Stop {}) } else { (()) }
         }
-        fn read(trace: Ptr<i32>, fail: bool) -> (i32 | Err<_>)  {
+        fn read(trace: PtrMut<i32>, fail: bool) -> (i32 | Err<_>)  {
             let one = single(trace)?;
             let array = sequence(trace)?;
             let pointer = one:get();
@@ -587,7 +587,7 @@ fn weak_payloads_require_upgrade_before_dereference_or_field_access() {
     for source in [
         "fn f(value: WeakPtr<Resource>)  { value.*; }",
         "fn f(value: WeakPtr<Resource>)  { value.digit; }",
-        "fn f(value: Ptr<WeakPtr<Resource>>)  { value.digit; }",
+        "fn f(value: PtrMut<WeakPtr<Resource>>)  { value.digit; }",
         "fn f(value: WeakPtr<Resource>)  { value:read(); }",
     ] {
         assert!(
@@ -630,7 +630,7 @@ struct Stopped { code: u32, }
     fn check(stop: bool) -> (() | Err<Stopped>)  {
         if (stop) { Err(Stopped { code = u32(7) }) } else { (()) }
     }
-    fn exercise(trace: Ptr<i32>, mode: i32) -> (i32 | Err<Stopped>)  {
+    fn exercise(trace: PtrMut<i32>, mode: i32) -> (i32 | Err<Stopped>)  {
         let mut owner = resource_make(trace, 1);
         let mut index = 0;
         while ({

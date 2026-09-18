@@ -4,10 +4,10 @@ import { "$/string.resin", "$/stdio.resin", "$/shared.resin" };
 
 struct List {
 	value: i32,
-	next: Ptr<List>,
+	next: PtrMut<List>,
 }
 
-fn cons(value: i32, next: Ptr<List>) -> List {
+fn cons(value: i32, next: PtrMut<List>) -> List {
 	List { value = value, next = next }
 }
 
@@ -15,16 +15,16 @@ fn car(node: Ref<List>) -> i32 {
 	node.value
 }
 
-fn cdr(node: Ref<List>) -> Ptr<List> {
+fn cdr(node: Ref<List>) -> PtrMut<List> {
 	node.next
 }
 
-fn at(p: Ptr<List>) -> i32 {
+fn at(p: PtrMut<List>) -> i32 {
 	p.value
 }
 
 fn main() -> () | Err<_> {
-	let tail = arc_ptr_alloc(cons(2, Ptr<List>(u64(0))))?;
+	let tail = arc_ptr_alloc(cons(2, PtrMut<List>(u64(0))))?;
 	let mut head = cons(1, tail:get());
 	let text = fmt("list = {0}, {1}\n", (car(head), at(cdr(head))));
 	print(text);

@@ -336,6 +336,7 @@ fn layout_type(ty: &crate::Type, context: &Context, span: Span, depth: usize) ->
             child(&Solver::default().require_complete(&applied, span)?)?
         }
         crate::Type::Pointer { .. } => Ty::Pointer {
+            mutable: true,
             pointee: Box::new(Ty::Unit),
         },
         crate::Type::Function { .. } => Ty::Function {

@@ -46,7 +46,7 @@ fn sizeof_matches_layout_after_generic_specialization() {
         result(
             r#"export { main };
         struct Pair<T> { first: T, second: T, }
-        struct Node { next: Ptr<Node>, value: i32, }
+        struct Node { next: PtrMut<Node>, value: i32, }
         const pair_bytes = sizeof(Pair<i32>);
         const node_bytes = sizeof(Node);
         fn size<T>() -> u64  { sizeof(T) }
@@ -155,7 +155,7 @@ fn constants_lower_to_shader_literals_without_runtime_arithmetic() {
         r#"export { kernel };
         const ( first: u32 = 1 << iota; second: u32 = 1 << iota; );
         const answer: u32 = (first + second) * 14;
-        @compute_shader fn kernel(index: u64, output: Ptr<u32>)  {
+        @compute_shader fn kernel(index: u64, output: PtrMut<u32>)  {
             const bytes = sizeof(f64);
             let mut native_bytes = sizeof(f64);
             output.* = answer;

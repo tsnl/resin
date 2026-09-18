@@ -145,7 +145,7 @@ impl<'a> Types<'a> {
             return;
         }
         emitted[self.id(ty)] = true;
-        if let Ty::Pointer { pointee }
+        if let Ty::Pointer { pointee, .. }
         | Ty::Reference {
             referent: pointee, ..
         } = ty

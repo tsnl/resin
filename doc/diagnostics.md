@@ -16,7 +16,7 @@ to compiler failure reports.
 | Target lowering | Operations have a supported C or SPIR-V representation; representation failures retain their source origin |
 | Native tools | Generated code has compiled and shaders have passed the configured optimizer |
 
-`Ref<T>`, `RefMut<T>`, and `Ptr<T>` stay distinct through verification.
+`Ref<T>`/`RefMut<T>` and `Ptr<T>`/`PtrMut<T>` stay distinct through verification.
 Writes require writable access; read-only references cannot regain that permission. Neither specialization
 nor verification has a conversion from a reference to a pointer. See
 [References](references.md) for the language contract and unchecked lifetimes.

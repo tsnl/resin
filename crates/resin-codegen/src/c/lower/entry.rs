@@ -74,5 +74,5 @@ pub(super) fn emit(types: &Types<'_>, entry: &str) -> Result<String, Error> {
 }
 
 fn string_array(ty: &Ty) -> bool {
-    matches!(ty, Ty::Pointer { pointee } if matches!(pointee.as_ref(), Ty::Pointer { pointee } if pointee.as_ref() == &Ty::UInt8))
+    matches!(ty, Ty::Pointer { pointee, mutable: false } if matches!(pointee.as_ref(), Ty::Pointer { pointee, mutable: false } if pointee.as_ref() == &Ty::UInt8))
 }

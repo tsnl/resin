@@ -18,7 +18,8 @@ fn string_from_bytes(text: Ref<Span<u8>>) -> String {
 }
 
 fn get(self: Ref<String>) -> Span<u8> {
-	self.storage:get()
+	let view = self.storage:get();
+	view:read_only()
 }
 
 // A borrowed text view for repr and automatic formatting.

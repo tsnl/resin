@@ -29,7 +29,7 @@ fn foreign_functions_forward_separate_c_arguments() {
         extern {{
             "{header}": {{
                 fn answer () -> i32;
-                fn assign (out: Ptr<i32>, value: i32);
+                fn assign (out: PtrMut<i32>, value: i32);
             }},
             "stdlib.h": {{
                 fn abs (n: i32) -> i32;
@@ -63,7 +63,7 @@ import { "$/shared.resin" };
 
 
         struct FieldsValue<T0> { value: T0, }
-fn identity(p: Ptr<FieldsValue<i32>>, calls: Ptr<i32>) -> Ptr<FieldsValue<i32>>  {
+fn identity(p: PtrMut<FieldsValue<i32>>, calls: PtrMut<i32>) -> PtrMut<FieldsValue<i32>>  {
             calls.* = calls.* + 1;
             p
         }
@@ -71,7 +71,7 @@ fn identity(p: Ptr<FieldsValue<i32>>, calls: Ptr<i32>) -> Ptr<FieldsValue<i32>> 
             let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
             let record_owner = arc_ptr_alloc(FieldsValue<_> { value = 1 })?; let record: Ref<_> = record_owner:get().*;
             let mut pointer = &identity(record_owner:get(), calls_owner:get()).value;
-            let mut copy = Ptr<i32>(u64(pointer));
+            let mut copy = PtrMut<i32>(u64(pointer));
             copy.* = 41;
             record.value + calls
         }
@@ -100,14 +100,14 @@ fn foreign_aggregate_values_and_implicit_pointer_casts_are_rejected() {
         "export { main }; extern type Native; fn main() -> ()  { let mut value: Native; }",
         "extern type Native; fn identity (n: Native) -> Native  { n }",
         "extern type Native; struct Wrapped { value: Native, }",
-        "extern type Native; fn read (n: Ptr<Native>) -> ()  { n.*; }",
+        "extern type Native; fn read (n: PtrMut<Native>) -> ()  { n.*; }",
     ] {
         assert!(error(source).contains("OpaqueValue"), "{source}");
     }
     for source in [
-        "export { main }; fn f (p: Ptr<i32>) -> ()  {} fn main() -> ()  { let mut x = 0; f(u64(0)); }",
-        "export { main }; fn f (p: Ptr<u8>) -> ()  {} fn main() -> ()  { let mut x: i32; x = 0; f(&x); }",
-        "export { main }; fn main() -> ()  { let mut x = Ptr<i32>(f32(0.0)); }",
+        "export { main }; fn f (p: PtrMut<i32>) -> ()  {} fn main() -> ()  { let mut x = 0; f(u64(0)); }",
+        "export { main }; fn f (p: PtrMut<u8>) -> ()  {} fn main() -> ()  { let mut x: i32; x = 0; f(&x); }",
+        "export { main }; fn main() -> ()  { let mut x = PtrMut<i32>(f32(0.0)); }",
     ] {
         assert!(error(source).contains("TypeMismatch"), "{source}");
     }
@@ -162,13 +162,13 @@ fn imports_are_relative_deduplicated_and_checked_for_cycles() {
 #[test]
 fn shader_declarations_validate_signatures_and_do_not_expose_bytecode() {
     for source in [
-        "@compute_shader fn kernel(index: u64, output: Ptr<u32>)  {} fn main()  { kernel.spirv; }",
+        "@compute_shader fn kernel(index: u64, output: PtrMut<u32>)  {} fn main()  { kernel.spirv; }",
         "fn kernel(i: u32) -> u32  { i } fn main()  { let mut code = kernel.spirv; }",
         "@geometry_shader fn kernel(i: u32) -> u32  { i }",
         "@compute_shader @vertex_shader fn kernel(i: u32) -> u32  { i }",
         "@compute_shader fn kernel(i: i32) -> i32  { i }",
         "@compute_shader fn kernel(i: u32) -> u32  { i }",
-        "@compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main()  { let mut alias = kernel; let mut code = alias.spirv; }",
+        "@compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main()  { let mut alias = kernel; let mut code = alias.spirv; }",
         "extern { \"stdlib.h\": { fn abs(i: i32) -> i32; } }; fn main()  { let mut code = abs.spirv; }",
     ] {
         assert!(!error(source).is_empty(), "{source}");
@@ -184,9 +184,9 @@ fn shader_is_an_ordinary_available_function_name() {
 fn compute_declarations_require_ulong_indices() {
     for ty in ["u32", "i32", "i64"] {
         let source = format!(
-            "@compute_shader fn kernel(index: {ty}, output: Ptr<u64>)  {{ output.* = u64(index); }}"
+            "@compute_shader fn kernel(index: {ty}, output: PtrMut<u64>)  {{ output.* = u64(index); }}"
         );
-        assert!(error(&source).contains("expected (u64, Ptr<T>)"));
+        assert!(error(&source).contains("expected (u64, Ptr<T>/PtrMut<T>)"));
     }
-    module("@compute_shader fn kernel(index: u64, output: Ptr<u64>)  { output.* = index; }");
+    module("@compute_shader fn kernel(index: u64, output: PtrMut<u64>)  { output.* = index; }");
 }

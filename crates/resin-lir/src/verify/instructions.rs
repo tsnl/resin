@@ -157,6 +157,7 @@ pub(super) fn check_instr(
                 location,
             )?;
             stack.push(Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(pointee.clone()),
             });
         }
@@ -217,7 +218,7 @@ pub(super) fn check_instr(
         }
         Instr::IsVariant { tag } => {
             let from = pop_one(stack, location)?;
-            let from = if let Ty::Pointer { pointee }
+            let from = if let Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             } = from
@@ -279,27 +280,20 @@ pub(super) fn check_instr(
         }
         Instr::Borrow => {
             let source = pop_one(stack, location)?;
-            let Ty::Pointer { pointee } = source else {
+            let Ty::Pointer { pointee, mutable } = source else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: source }));
             };
             stack.push(Ty::Reference {
-                mutable: true,
+                mutable,
                 referent: pointee,
             });
         }
         Instr::ReadOnly => {
             let source = pop_one(stack, location)?;
-            let Ty::Reference {
-                mutable: true,
-                referent,
-            } = source
-            else {
-                return Err(location.error(VerifyErrorKind::ExpectedPointer { found: source }));
-            };
-            stack.push(Ty::Reference {
-                mutable: false,
-                referent,
-            });
+            let target = source.read_only().ok_or_else(|| {
+                location.error(VerifyErrorKind::ExpectedPointer { found: source })
+            })?;
+            stack.push(target);
         }
         Instr::AccessStatic { index } => {
             let source = pop_one(stack, location)?;
@@ -311,16 +305,20 @@ pub(super) fn check_instr(
         }
         Instr::PointerBytes => {
             let args = pop(stack, 2, location)?;
-            if !matches!(&args[0], Ty::Pointer { pointee } if pointee.is_numeric()) {
+            if !matches!(&args[0], Ty::Pointer { pointee, .. } if pointee.is_numeric()) {
                 return Err(location.error(VerifyErrorKind::TypeMismatch {
                     expected: Ty::Pointer {
+                        mutable: true,
                         pointee: Box::new(Ty::UInt8),
                     },
                     found: args[0].clone(),
                 }));
             }
             expect_types(&[Ty::UInt64], &args[1..], location)?;
-            stack.push(Ty::byte_span());
+            stack.push(Ty::byte_span(matches!(
+                args[0],
+                Ty::Pointer { mutable: true, .. }
+            )));
         }
         Instr::PointerIndex | Instr::PointerRange => {
             let count = if matches!(instr, Instr::PointerRange) {
@@ -329,7 +327,7 @@ pub(super) fn check_instr(
                 3
             };
             let args = pop(stack, count, location)?;
-            let Ty::Pointer { pointee } = &args[0] else {
+            let Ty::Pointer { pointee, .. } = &args[0] else {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer {
                     found: args[0].clone(),
                 }));
@@ -355,7 +353,7 @@ pub(super) fn check_instr(
         Instr::Load | Instr::TransferLoad => {
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            let (Ty::Pointer { pointee }
+            let (Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             }) = shape
@@ -371,12 +369,14 @@ pub(super) fn check_instr(
             let value = pop_one(stack, location)?;
             let address = pop_one(stack, location)?;
             let shape = shape(&module.types, address.clone(), location)?;
-            if matches!(shape, Ty::Reference { mutable: false, .. })
-                || (matches!(instr, Instr::Replace) && !matches!(shape, Ty::Pointer { .. }))
+            if matches!(
+                shape,
+                Ty::Reference { mutable: false, .. } | Ty::Pointer { mutable: false, .. }
+            ) || (matches!(instr, Instr::Replace) && !matches!(shape, Ty::Pointer { .. }))
             {
                 return Err(location.error(VerifyErrorKind::ExpectedPointer { found: address }));
             }
-            let (Ty::Pointer { pointee }
+            let (Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             }) = shape
@@ -527,7 +527,8 @@ fn project_static(
             mutable,
             referent: Box::new(project_static(table, *referent, index, location)?),
         }),
-        Ty::Pointer { pointee } => Ok(Ty::Pointer {
+        Ty::Pointer { pointee, mutable } => Ok(Ty::Pointer {
+            mutable,
             pointee: Box::new(project_static(table, *pointee, index, location)?),
         }),
         Ty::Defined { .. } => {
@@ -563,12 +564,16 @@ fn project_dynamic(table: &[TypeDef], source: Ty, location: Location) -> Result<
             }),
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
         },
-        Ty::Pointer { pointee } => match shape(table, *pointee, location)? {
-            Ty::Array { element, .. } => Ok(Ty::Pointer { pointee: element }),
+        Ty::Pointer { pointee, mutable } => match shape(table, *pointee, location)? {
+            Ty::Array { element, .. } => Ok(Ty::Pointer {
+                pointee: element,
+                mutable,
+            }),
             found => Err(location.error(VerifyErrorKind::ExpectedArray { found })),
         },
         Ty::Defined { .. } => project_dynamic(table, shape(table, source, location)?, location),
         Ty::Str => Ok(Ty::Pointer {
+            mutable: false,
             pointee: Box::new(Ty::UInt8),
         }),
         Ty::Array { element, .. } => Ok(*element),

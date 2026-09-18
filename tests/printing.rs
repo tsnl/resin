@@ -261,7 +261,7 @@ fn invalid_print_types_are_rejected() {
 #[test]
 fn shader_print_rejects_host_only_string_types() {
     let error = pipeline::shader_error(
-        r#"export { kernel }; import { "$/string.resin", "$/stdio.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: u64, text: Ptr<Span<u8>>)  { print(text.*); }"#,
+        r#"export { kernel }; import { "$/string.resin", "$/stdio.resin", "$/span.resin" }; @compute_shader fn kernel(invocation: u64, text: PtrMut<Span<u8>>)  { print(text.*); }"#,
     );
     assert!(
         error.contains("shader cannot call foreign function resin_print"),
@@ -574,7 +574,7 @@ fn verifier_rejects_invalid_text_view_callbacks() {
 fn repr_does_not_follow_pointers() {
     prints(
         r#"export { main }; import { "$/string.resin", "$/stdio.resin" };
-        fn main()  { { let borrowed = repr(Ptr<i32>(u64(1))); print(borrowed) }; }"#,
+        fn main()  { { let borrowed = repr(PtrMut<i32>(u64(1))); print(borrowed) }; }"#,
         b"0x1",
     );
 }

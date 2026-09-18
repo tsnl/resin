@@ -58,7 +58,7 @@ mod tests {
             "struct Cell<T> { value: T, }",
             "struct Point<T> { x: T, y: T }",
             "struct Point<T> { x: T, y: T, }",
-            "struct Nested<T> { pair: (T, T), next: Ptr<Nested<T>> }",
+            "struct Nested<T> { pair: (T, T), next: PtrMut<Nested<T>> }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn parses_module_items_and_address_of() {
         for source in [
-            "export { Gpu, create }; extern { \"runtime.h\": { fn create (gpu: Ptr<Ptr<Gpu>>) -> i32; } }; import { \"runtime.resin\" }; extern type Gpu;",
+            "export { Gpu, create }; extern { \"runtime.h\": { fn create (gpu: PtrMut<PtrMut<Gpu>>) -> i32; } }; import { \"runtime.resin\" }; extern type Gpu;",
             "fn empty () -> ()  {} fn identity (n: i32) -> i32  { n }",
             "fn main () -> ()  { let mut n = 0; let mut p = &n; p.* = 1; }",
         ] {
@@ -269,6 +269,7 @@ mod tests {
         }
         for name in [
             "Ptr",
+            "PtrMut",
             "Ref",
             "RefMut",
             "Err",
@@ -300,14 +301,14 @@ mod tests {
     #[test]
     fn type_formers_use_angle_brackets_without_conflicting_with_operators() {
         for source in [
-            "type P = Ptr<i32>; type Pp = Ptr<Ptr<i32>>; type S = Span<Ptr<i32>>;",
-            "struct Span<T> { data: Ptr<T>, length: u64, } struct ArcPtr<T> { owner: StrongOwner, } type GpuSpan<T> = Span<T>;",
-            "type P = GpuSpan<i32, i32>;",
-            "struct FieldsX<T0> { x: T0, }\ntype G = GpuPtr<i32>; type S = GpuSpan<FieldsX<u32>>; type Nested = Ptr<GpuSpan<GpuPtr<i32>>>;",
+            "type P = PtrMut<i32>; type Pp = PtrMut<PtrMut<i32>>; type S = SpanMut<PtrMut<i32>>;",
+            "struct SpanMut<T> { data: PtrMut<T>, length: u64, } struct ArcPtr<T> { owner: StrongOwner, } type GpuSpanMut<T> = SpanMut<T>;",
+            "type P = GpuSpanMut<i32, i32>;",
+            "struct FieldsX<T0> { x: T0, }\ntype G = GpuPtrMut<i32>; type S = GpuSpanMut<FieldsX<u32>>; type Nested = PtrMut<GpuSpanMut<GpuPtrMut<i32>>>;",
             "fn launch(args: GpuArguments) -> GpuArguments  { args }",
-            "fn first(p: GpuSpan<i32>) -> GpuPtr<i32>  { p:at(u64(0)) } fn make() -> GpuPtr<_>  { gpu:create::<i32>(i32(3)) }",
-            "struct FieldsX<T0> { x: T0, }\ntype P = Ptr<()>; type S = Span<(i32, i32)>; type R = Ptr<FieldsX<i32>>; type F = Ptr<(i32) -> i32>;",
-            "fn main() -> ()  { let mut p = Ptr<i32>(u64(0)); let mut x = u64(p) > u64(0); let mut y = 8 >> 1; let mut z = 1 < 2; }",
+            "fn first(p: GpuSpanMut<i32>) -> GpuPtrMut<i32>  { p:at(u64(0)) } fn make() -> GpuPtrMut<_>  { gpu:create::<i32>(i32(3)) }",
+            "struct FieldsX<T0> { x: T0, }\ntype P = PtrMut<()>; type S = SpanMut<(i32, i32)>; type R = PtrMut<FieldsX<i32>>; type F = PtrMut<(i32) -> i32>;",
+            "fn main() -> ()  { let mut p = PtrMut<i32>(u64(0)); let mut x = u64(p) > u64(0); let mut y = 8 >> 1; let mut z = 1 < 2; }",
             "fn main() -> ()  { let mut p = Ptr < Ptr < i32 > >(u64(0)); }",
             "fn fibonacci(n: i32) -> i32  { n } fn main() -> ()  { let mut x = fibonacci(2); let mut y = fibonacci(3); }",
             "fn main() -> ()  { let mut x = Name { value = 1 }; let mut y = Converter([1, 2]); }",
@@ -318,12 +319,12 @@ mod tests {
             "type P = Ptr(i32);",
             "type P = Span (i32);",
             "type P = Ptr i32;",
-            "type P = Ptr<1>;",
-            "type P = Ptr<>;",
-            "type P = Ptr<i32, i32>;",
-            "type P = Ptr<Ptr<i32>;",
-            "type P = GpuPtr<>;",
-            "type P = GpuPtr(i32);",
+            "type P = PtrMut<1>;",
+            "type P = PtrMut<>;",
+            "type P = PtrMut<i32, i32>;",
+            "type P = PtrMut<PtrMut<i32>;",
+            "type P = GpuPtrMut<>;",
+            "type P = GpuPtrMut(i32);",
         ] {
             assert!(parse(source).root_node().has_error(), "{source}");
         }
@@ -369,14 +370,14 @@ mod tests {
             "fn empty()  {} fn explicit() -> ()  { () }",
             "fn greet(n: i32)  { print(\"{0}\", (n,)); }",
             "fn f(n: i32)  { n }",
-            "extern { \"stdlib.h\": { fn free(p: Ptr<u8>); } };",
+            "extern { \"stdlib.h\": { fn free(p: PtrMut<u8>); } };",
             "fn apply(f: () -> ())  { f() }",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }
         for source in [
             "fn empty() ->  {}",
-            "extern { \"stdlib.h\": { fn free(p: Ptr<u8>) ->; } };",
+            "extern { \"stdlib.h\": { fn free(p: PtrMut<u8>) ->; } };",
             "fn empty() {};",
             "def empty() = {};",
             "type Callback = (i32) ->;",
@@ -392,7 +393,7 @@ mod tests {
             "extern {};",
             "extern { \"empty.h\": {} };",
             "extern { \"first.h\": { fn first(); fn second(); }, \"empty.h\": {}, };",
-            "export { call }; extern { \"native.h\": { fn call(value: Ptr<Handle>); } }; import { \"types.resin\" }; extern type Handle;",
+            "export { call }; extern { \"native.h\": { fn call(value: PtrMut<Handle>); } }; import { \"types.resin\" }; extern type Handle;",
         ] {
             assert!(!parse(source).root_node().has_error(), "{source}");
         }

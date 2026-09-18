@@ -7,14 +7,14 @@ check statuses before returning out-parameter values. For example:
 export { Gpu, gpu_new };
 extern {
 	"resin_runtime.h": {
-		fn resin_gpu_create(gpu: Ptr<Ptr<ResinGpu>>) -> i32;
-		fn resin_gpu_destroy(gpu: Ptr<ResinGpu>);
+		fn resin_gpu_create(gpu: PtrMut<PtrMut<ResinGpu>>) -> i32;
+		fn resin_gpu_destroy(gpu: PtrMut<ResinGpu>);
 	},
 };
 import { "$/status.resin", "$/shared.resin" };
 
 extern type ResinGpu;
-struct GpuOwner { handle: Ptr<ResinGpu> }
+struct GpuOwner { handle: PtrMut<ResinGpu> }
 fn drop(owner: RefMut<GpuOwner>) {
 	if (u64(owner.handle) != u64(0)) {
 		resin_gpu_destroy(owner.handle);
@@ -22,7 +22,7 @@ fn drop(owner: RefMut<GpuOwner>) {
 }
 struct Gpu { owner: ArcPtr<GpuOwner> }
 fn gpu_new() -> Gpu | Err<RuntimeError> {
-	let owner = arc_ptr_alloc(GpuOwner { handle = Ptr<ResinGpu>(u64(0)) })?;
+	let owner = arc_ptr_alloc(GpuOwner { handle = PtrMut<ResinGpu>(u64(0)) })?;
 	runtime_status_from_code(resin_gpu_create(&owner:get().handle))?;
 	Gpu { owner = owner }
 }
@@ -50,6 +50,8 @@ The prototype targets 64-bit hosts. Foreign functions accept scalar/pointer para
 The wrapper forwards each Resin parameter as a separate C argument. Opaque `extern type`
 declarations name C structs and may only be used behind pointers; aggregates by value,
 variadic calls, and C callbacks are not supported yet.
+
+Declare inputs as `Ptr<T>` and writable/out parameters as `PtrMut<T>`.
 
 This is an unchecked C boundary: declarations must match the header's ABI, and callers own
 pointer validity, lifetimes, buffer lengths, and synchronization. `&place` takes an address only for storage reached through a pointer;

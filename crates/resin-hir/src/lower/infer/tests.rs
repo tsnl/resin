@@ -61,6 +61,7 @@ fn field_access_preserves_nominal_identity_and_autoderefs_pointers() {
     let definition = typer.create_type("Node", body.clone()).unwrap();
     let node = Ty::Defined { definition };
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(body.clone()),
     };
     for (base, steps) in [
@@ -83,6 +84,7 @@ fn field_access_preserves_nominal_identity_and_autoderefs_pointers() {
         })
     ));
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::Int64),
     };
     assert_eq!(
@@ -168,10 +170,13 @@ fn nested_variables_are_independent() {
     let mut solver = Solver::default();
     let a = solver.fresh();
     let b = solver.fresh();
-    let ty = Type::function(vec![Type::pointer(a.clone())], Type::pointer(b.clone()));
+    let ty = Type::function(
+        vec![Type::pointer(a.clone(), true)],
+        Type::pointer(b.clone(), true),
+    );
     let concrete = Type::function(
-        vec![Type::pointer(Ty::Int32.into())],
-        Type::pointer(Ty::Bool.into()),
+        vec![Type::pointer(Ty::Int32.into(), true)],
+        Type::pointer(Ty::Bool.into(), true),
     );
     solver.unify(&ty, &concrete, SPAN).unwrap();
     assert_eq!(solver.resolve(&a), Some(Ty::Int32));
@@ -183,7 +188,9 @@ fn cycles_and_ambiguity_are_errors_not_unit() {
     let mut solver = Solver::default();
     let a = solver.fresh();
     let b = solver.fresh();
-    solver.unify(&a, &Type::pointer(b.clone()), SPAN).unwrap();
+    solver
+        .unify(&a, &Type::pointer(b.clone(), true), SPAN)
+        .unwrap();
     assert!(solver.unify(&a, &b, SPAN).is_err());
     assert!(solver.require(&a, SPAN).is_err());
 }
@@ -303,13 +310,14 @@ fn recursive_applications_retain_distinct_substitutions_until_a_result_is_determ
     let mut solver = infer::Solver::default();
     let result = solver.fresh();
     let span = Span { start: 0, end: 1 };
-    let recursive = application(&result, infer::Type::pointer(parameter(0)));
+    let recursive = application(&result, infer::Type::pointer(parameter(0), true));
     assert!(!solver.unify(&result, &recursive, span).unwrap());
     assert!(solver.complete(&result).is_none());
     assert!(solver.unify(&result, &parameter(0), span).unwrap());
     assert_eq!(
         solver.require_complete(&recursive, span).unwrap(),
         crate::Type::Pointer {
+            mutable: true,
             pointee: Box::new(crate::Type::Parameter {
                 parameter: crate::TypeParameterId::from_index(0)
             })
@@ -385,7 +393,7 @@ fn nested_applications_substitute_without_capturing_definition_binders() {
     let mut solver = infer::Solver::default();
     let result = solver.fresh();
     let span = Span { start: 0, end: 1 };
-    let inner = application(&result, infer::Type::pointer(parameter(1)));
+    let inner = application(&result, infer::Type::pointer(parameter(1), true));
     let outer = infer::Type::Apply {
         body: Box::new(inner),
         arguments: vec![(crate::TypeParameterId::from_index(1), Ty::Int32.into())],
@@ -395,6 +403,7 @@ fn nested_applications_substitute_without_capturing_definition_binders() {
     assert_eq!(
         solver.require_complete(&outer, span).unwrap(),
         crate::Type::Pointer {
+            mutable: true,
             pointee: Box::new(crate::Type::Int32)
         }
     );
@@ -496,7 +505,7 @@ fn nominal_constructors_supply_field_context_without_materializing_layouts() {
         (
             SPAN,
             infer::Constraint::Field(
-                Type::pointer(constructed.clone()),
+                Type::pointer(constructed.clone(), true),
                 "value".into(),
                 field.clone(),
             ),

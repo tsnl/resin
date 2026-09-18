@@ -70,9 +70,12 @@ pub(super) fn check(
             expect_type(Ty::GpuView, args[0].clone(), location)?;
             expect_type(Ty::UInt64, args[1].clone(), location)?;
             expect_type(Ty::UInt64, args[3].clone(), location)?;
-            let Ty::Pointer { pointee } = &args[2] else {
+            let Ty::Pointer { pointee, mutable } = &args[2] else {
                 return Err(invalid());
             };
+            if matches!(instr, Instr::GpuViewCopyTo) && !mutable {
+                return Err(invalid());
+            }
             gpu_element(module, pointee, location)?;
             Ty::Unit
         }
@@ -101,6 +104,7 @@ pub(super) fn check(
 
 fn byte_pointer() -> Ty {
     Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::UInt8),
     }
 }

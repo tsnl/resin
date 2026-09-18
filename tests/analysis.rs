@@ -148,14 +148,14 @@ fn gpu_workgroup_size_has_source_method_hover_completion_and_navigation() {
 
 #[test]
 fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
-    let library = "export { Cell , read, choose }; struct Cell<T> { value: T,   }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U  { value }\n";
-    let source = "import { \"library.resin\" }; type IntCell = Cell<i32>; fn use(cell: Ptr<IntCell>) -> u64  { cell:read(); cell:choose::<_, u64>(42) }";
+    let library = "export { Cell , read, choose }; struct Cell<T> { value: T,   }\nfn read<T>(self: PtrMut<Cell<T>>) -> T  { self.value }\n\nfn choose<T, U>(self: PtrMut<Cell<T>>, value: U) -> U  { value }\n";
+    let source = "import { \"library.resin\" }; type IntCell = Cell<i32>; fn use(cell: PtrMut<IntCell>) -> u64  { cell:read(); cell:choose::<_, u64>(42) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
     for (name, expected) in [
-        ("read", "read: (Ptr<Cell<i32>>) -> i32"),
-        ("choose", "choose: (Ptr<Cell<i32>>, u64) -> u64"),
+        ("read", "read: (PtrMut<Cell<i32>>) -> i32"),
+        ("choose", "choose: (PtrMut<Cell<i32>>, u64) -> u64"),
     ] {
         let offset = source.find(&format!("cell:{name}")).unwrap() + 5;
         assert_eq!(analysis.hover(&input, offset).unwrap().text, expected);
@@ -175,8 +175,8 @@ fn generic_method_calls_show_substituted_signatures_and_original_definitions() {
 
 #[test]
 fn unfinished_generic_operation_access_keeps_receiver_substitution_and_other_binders() {
-    let library = "export { Cell, read, choose, cell_make }; struct Cell<T> { value: T } fn read<T>(self: Ptr<Cell<T>>) -> T { self.value } fn choose<T, U>(self: Ptr<Cell<T>>, value: U) -> U { value } fn cell_make<T>(value: T) -> Cell<T> { Cell<T> { value = value } }";
-    let source = "import { \"library.resin\" }; fn use(cell: Ptr<Cell<i32>>) { cell:; }";
+    let library = "export { Cell, read, choose, cell_make }; struct Cell<T> { value: T } fn read<T>(self: PtrMut<Cell<T>>) -> T { self.value } fn choose<T, U>(self: PtrMut<Cell<T>>, value: U) -> U { value } fn cell_make<T>(value: T) -> Cell<T> { Cell<T> { value = value } }";
+    let source = "import { \"library.resin\" }; fn use(cell: PtrMut<Cell<i32>>) { cell:; }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
@@ -185,9 +185,9 @@ fn unfinished_generic_operation_access_keeps_receiver_substitution_and_other_bin
         source.find(":;").unwrap() + 1,
     );
     let choose = items.iter().find(|item| item.name == "choose").unwrap();
-    assert_eq!(choose.detail, "choose: (Ptr<Cell<i32>>, U) -> U");
+    assert_eq!(choose.detail, "choose: (PtrMut<Cell<i32>>, U) -> U");
     let read = items.iter().find(|item| item.name == "read").unwrap();
-    assert_eq!(read.detail, "read: (Ptr<Cell<i32>>) -> i32");
+    assert_eq!(read.detail, "read: (PtrMut<Cell<i32>>) -> i32");
 }
 
 #[test]
@@ -212,13 +212,13 @@ fn generic_function_references_keep_their_original_declaration() {
 fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     let input = Source::new(
         "main.resin",
-        "import { \"library.resin\" }; fn use(cell: Ptr<Cell<i32>>) -> _  { cell:read() }",
+        "import { \"library.resin\" }; fn use(cell: PtrMut<Cell<i32>>) -> _  { cell:read() }",
     );
     let original = Source::new(
         "library.resin",
-        "export { Cell , read }; struct Cell<T> { value: T,  }\nfn read<T>(self: Ptr<Cell<T>>) -> T  { self.value }\n",
+        "export { Cell , read }; struct Cell<T> { value: T,  }\nfn read<T>(self: PtrMut<Cell<T>>) -> T  { self.value }\n",
     );
-    let changed = original.with_text("export { Cell , read }; struct Cell<T> { padding: u8, value: T,  }\nfn read<T>(self: Ptr<Cell<T>>) -> i64  { 42 }\n");
+    let changed = original.with_text("export { Cell , read }; struct Cell<T> { padding: u8, value: T,  }\nfn read<T>(self: PtrMut<Cell<T>>) -> i64  { 42 }\n");
     let mut loader = resin_source::Loader::new(Default::default());
     loader
         .set_import(&input, "library.resin", original.clone())
@@ -230,9 +230,9 @@ fn generic_method_editor_snapshots_keep_completed_imported_schemes() {
     let after = support::frontend::analyze(input.clone(), &mut loader, Some(&before));
     let offset = input.text().find("cell:read").unwrap() + 5;
     for (analysis, library, expected) in [
-        (&before, &original, "read: (Ptr<Cell<i32>>) -> i32"),
-        (&after, &changed, "read: (Ptr<Cell<i32>>) -> i64"),
-        (&before, &original, "read: (Ptr<Cell<i32>>) -> i32"),
+        (&before, &original, "read: (PtrMut<Cell<i32>>) -> i32"),
+        (&after, &changed, "read: (PtrMut<Cell<i32>>) -> i64"),
+        (&before, &original, "read: (PtrMut<Cell<i32>>) -> i32"),
     ] {
         assert!(
             analysis.diagnostics().is_empty(),
@@ -254,8 +254,8 @@ fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
     let library = "export { Cell }; struct Cell<T> { value: T, }";
     for (parameters, receiver, result) in [
         ("", "Cell<i32>", "i32"),
-        ("", "Ptr<Ptr<Cell<i32>>>", "i32"),
-        ("<T>", "Ptr<Ptr<Cell<T>>>", "T"),
+        ("", "PtrMut<PtrMut<Cell<i32>>>", "i32"),
+        ("<T>", "PtrMut<PtrMut<Cell<T>>>", "T"),
     ] {
         let source = format!(
             "import {{ \"library.resin\" }}; fn read{parameters}(cell: {receiver}) -> {result} {{ cell.value }}"
@@ -284,8 +284,8 @@ fn generic_nominal_fields_retain_substitution_and_declaration_navigation() {
 
 #[test]
 fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
-    let library = "export { Outer , read }; struct Cell<T> { value: T, } struct Wrapped { cell: Cell<i32>, } struct Outer { wrapped: Wrapped, read: i32,  }\nfn read(self: Ptr<Outer>) -> i32  { self.wrapped.cell.value }\n";
-    let source = "import { \"library.resin\" }; fn use(outer: Ptr<Outer>) -> i32  { read(outer); outer:read(); outer.wrapped.cell.value }";
+    let library = "export { Outer , read }; struct Cell<T> { value: T, } struct Wrapped { cell: Cell<i32>, } struct Outer { wrapped: Wrapped, read: i32,  }\nfn read(self: PtrMut<Outer>) -> i32  { self.wrapped.cell.value }\n";
+    let source = "import { \"library.resin\" }; fn use(outer: PtrMut<Outer>) -> i32  { read(outer); outer:read(); outer.wrapped.cell.value }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
@@ -324,7 +324,7 @@ fn nominal_wrappers_of_generic_fields_keep_navigation_and_method_completion() {
 
 #[test]
 fn generic_field_completion_survives_an_unfinished_access() {
-    let source = "struct Cell<T> { value: T, } fn read(cell: Ptr<Cell<i32>>)  { cell.; }";
+    let source = "struct Cell<T> { value: T, } fn read(cell: PtrMut<Cell<i32>>)  { cell.; }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.build_hir();
     assert!(!analysis.diagnostics().is_empty());
@@ -423,7 +423,7 @@ fn tuple_members_and_function_hovers_use_source_syntax() {
 
 #[test]
 fn imported_generic_aliases_keep_binder_navigation_and_concrete_hover() {
-    let library = "export { View }; type View<T> = Ptr<T>;";
+    let library = "export { View }; type View<T> = PtrMut<T>;";
     let source = "import { \"library.resin\" }; fn use_view<T>(view: View<T>) -> T  { view.* } fn main() -> i32  { let mut value = 42; let mut pointer: View<i32>; pointer = View<i32>(u64(0)); use_view(pointer) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
@@ -435,10 +435,10 @@ fn imported_generic_aliases_keep_binder_navigation_and_concrete_hover() {
     let hover = analysis
         .hover(&input, source.rfind("pointer").unwrap())
         .unwrap();
-    assert_eq!(hover.text, "pointer: Ptr<i32>");
+    assert_eq!(hover.text, "pointer: PtrMut<i32>");
     let library_source = project.source("library.resin");
     let origin = analysis
-        .definition(&library_source, library.find("Ptr<T>").unwrap() + 4)
+        .definition(&library_source, library.find("PtrMut<T>").unwrap() + 7)
         .unwrap();
     assert_eq!(origin.span.start, library.find("View<T>").unwrap() + 5);
 }
@@ -529,7 +529,7 @@ fn standard_library_resource_methods_support_editor_navigation_and_recovery() {
             );
         }
         for (method, result) in [
-            ("alloc_in", "-> GpuSpan<u8> | Err<"),
+            ("alloc_in", "-> GpuSpanMut<u8> | Err<"),
             ("start_command_recording", "GpuCommands | Err<"),
         ] {
             let call = source.find(&format!(":{method}")).unwrap() + 1;
@@ -611,13 +611,13 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
     ] {
         let source = format!(
             r#"import {{ "$/gpu.resin", "$/graphics.resin" }};
-            struct Root {{ value: Ptr<i32>, }}
+            struct Root {{ value: PtrMut<i32>, }}
             struct HostRoot<T> {{ value: T, }}
             struct WrongRoot<T> {{ other: T, }}
             @compute_shader
-            fn kernel(index: u64, root: Ptr<Root>)  {{}}
+            fn kernel(index: u64, root: PtrMut<Root>)  {{}}
             @vertex_shader
-            fn vertex(index: i32, root: Ptr<Root>) -> Vertex  {{ rootless(index) }}
+            fn vertex(index: i32, root: PtrMut<Root>) -> Vertex  {{ rootless(index) }}
             @vertex_shader
             fn rootless(index: i32) -> Vertex  {{
                 Vertex {{ position = Position {{ x = f32(0), y = f32(0), z = f32(0), w = f32(1) }},
@@ -625,7 +625,7 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
             }}
             @fragment_shader
             fn fragment(color: Color) -> Color  {{ color }}
-            fn f(commands: GpuCommands, gpu: Gpu, buffer: GpuPtr<i32>, bytes: GpuPtr<u8>, pointer: Ptr<i32>) -> (() | Err<_>)  {{
+            fn f(commands: GpuCommands, gpu: Gpu, buffer: GpuPtrMut<i32>, bytes: GpuPtrMut<u8>, pointer: PtrMut<i32>) -> (() | Err<_>)  {{
                 let mut compute = gpu:create_compute_pipeline(kernel)?;
                 let mut graphics = gpu:create_graphics_pipeline(vertex, fragment)?;
                 let mut empty = gpu:create_graphics_pipeline(rootless, fragment)?;
@@ -659,10 +659,10 @@ fn gpu_commands_check_pipeline_stages_and_host_arguments() {
 fn typed_pipeline_calls_show_shader_contracts_in_editor_signatures() {
     let source = r#"import { "$/gpu.resin", "$/span.resin" };
         struct FieldsValuesScale<T0, T1> { values: T0, scale: T1, }
-struct Root { values: Span<i32>, scale: i32, }
+struct Root { values: SpanMut<i32>, scale: i32, }
         @compute_shader
-        fn kernel(index: u64, root: Ptr<Root>)  {}
-        fn f(gpu: Gpu, commands: GpuCommands, values: GpuSpan<i32>) -> (() | Err<_>)  {
+        fn kernel(index: u64, root: PtrMut<Root>)  {}
+        fn f(gpu: Gpu, commands: GpuCommands, values: GpuSpanMut<i32>) -> (() | Err<_>)  {
             let mut pipeline = gpu:create_compute_pipeline(kernel)?;
             commands:dispatch(pipeline, FieldsValuesScale<_, _> { values = values, scale = 2 }, 1, 1, 1)?;
             (())
@@ -679,7 +679,7 @@ struct Root { values: Span<i32>, scale: i32, }
     );
     for (method, contract) in [
         ("create_compute_pipeline", "GpuComputePipeline<Root,"),
-        ("dispatch", "GpuSpan<i32>"),
+        ("dispatch", "GpuSpanMut<i32>"),
     ] {
         let call = source.find(&format!(":{method}")).unwrap() + 1;
         let definition = analysis.definition(&input, call).unwrap();
@@ -700,8 +700,7 @@ struct Root { values: Span<i32>, scale: i32, }
 
 #[test]
 fn pointer_hover_and_completion_use_angle_bracket_types() {
-    let source =
-        "import { \"$/span.resin\" }; fn main (value: Ptr<Span<i32>>) -> Ptr<Span<i32>>  { value }";
+    let source = "import { \"$/span.resin\" }; fn main (value: PtrMut<SpanMut<i32>>) -> PtrMut<SpanMut<i32>>  { value }";
     let project = Project::new(&[("main.resin", source)]);
     let analysis = project.checked();
     assert_eq!(
@@ -712,10 +711,10 @@ fn pointer_hover_and_completion_use_angle_bracket_types() {
             )
             .unwrap()
             .text,
-        "value: Ptr<Span<i32>>"
+        "value: PtrMut<SpanMut<i32>>"
     );
 
-    let source = "type Number = i32; fn main () -> ()  { let mut value: Ptr<Num>; }";
+    let source = "type Number = i32; fn main () -> ()  { let mut value: PtrMut<Num>; }";
     let project = Project::new(&[("main.resin", source)]);
     let items = project.build_hir().completions(
         &project.source("main.resin"),
@@ -793,7 +792,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
     for receiver in ["values", "holder.values"] {
         for tail in ["", " values:;", " holder.values:;", " holder.values:at(; "] {
             let source = format!(
-                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [i32(1), i32(2)]; let mut holder = FieldsValues<_> {{ values = Span<i32> {{ data = Ptr<i32>(u64(0)), length = u64(2) }} }}; {receiver}:at(0); {receiver}:at_mut(0) = 3;{tail} }}"
+                "import {{ \"$/span.resin\" }}; struct FieldsValues<T0> {{ values: T0, }}\nfn main()  {{ let mut values = [i32(1), i32(2)]; let mut holder = FieldsValues<_> {{ values = SpanMut<i32> {{ data = PtrMut<i32>(u64(0)), length = u64(2) }} }}; {receiver}:at(0); {receiver}:at_mut(0) = 3;{tail} }}"
             );
             let project = Project::new(&[("main.resin", &source)]);
             let analysis = project.build_hir();
@@ -810,7 +809,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
                 if receiver == "values" {
                     "at: (Ref<[i32; 2]>, u64) -> Ref<i32>"
                 } else {
-                    "at: (Ref<Span<i32>>, u64) -> Ref<i32>"
+                    "at: (Ref<SpanMut<i32>>, u64) -> Ref<i32>"
                 }
             );
             let mutable_offset = source.find(":at_mut(0)").unwrap() + 1;
@@ -819,7 +818,7 @@ fn at_indexing_has_hover_and_completion_in_valid_and_incomplete_code() {
                 if receiver == "values" {
                     "at_mut: (RefMut<[i32; 2]>, u64) -> RefMut<i32>"
                 } else {
-                    "at_mut: (Ref<Span<i32>>, u64) -> RefMut<i32>"
+                    "at_mut: (Ref<SpanMut<i32>>, u64) -> RefMut<i32>"
                 }
             );
             let items = analysis.completions(&input, offset);
@@ -977,7 +976,7 @@ fn field_completion_before_existing_statements() {
         ] {
             for preceding in ["", "let mut earlier = root.height;"] {
                 let source = format!(
-                    "// é🌲\nimport {{ \"$/span.resin\" }}; struct Root {{ width: u32, height: u32, pixels: Span<u32>, }}\n@compute_shader fn kernel(index: u64, root: Ptr<Root>)  {{\n{preceding}\n{receiver}.\n{following}\n}}"
+                    "// é🌲\nimport {{ \"$/span.resin\" }}; struct Root {{ width: u32, height: u32, pixels: SpanMut<u32>, }}\n@compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {{\n{preceding}\n{receiver}.\n{following}\n}}"
                 );
                 let project = Project::new(&[("main.resin", &source)]);
                 let analysis = project.build_hir();
@@ -1787,10 +1786,10 @@ fn recovered_ast_contains_expression_type_and_field_holes() {
 #[test]
 fn editor_analysis_tolerates_truncation_and_deleted_tokens() {
     for source in [
-        "export { main }; struct Point { x: i32, } fn main(arg: Ptr<Point>)  { let mut value = arg.x + 1; print(fmt(\"{}\", value)); }",
+        "export { main }; struct Point { x: i32, } fn main(arg: PtrMut<Point>)  { let mut value = arg.x + 1; print(fmt(\"{}\", value)); }",
         "struct FieldsLeftRight<T0, T1> { left: T0, right: T1, }\nfn main(arg: i32) -> i32  { let mut pair = FieldsLeftRight<_, _> { left = arg, right = 1 }; if (arg == 0) (pair.left) else (pair.right) }",
-        "fn main()  { let mut values = [1, 2]; while (1 == 1) { let mut missing: Ptr<i32>; }; }",
-        "struct Cleanup { value: Ptr<i32>,  }\nfn drop(self: RefMut<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
+        "fn main()  { let mut values = [1, 2]; while (1 == 1) { let mut missing: PtrMut<i32>; }; }",
+        "struct Cleanup { value: PtrMut<i32>,  }\nfn drop(self: RefMut<Cleanup>)  { self.value.* = 42; }\n  fn main()  { let mut n = 0; let mut cleanup = Cleanup { value = &n }; }",
         "struct Item { value: i32, } fn main()  { let mut owner = ArcPtr<Item> { value = 42 }; let mut weak = owner:downgrade(); match (weak:upgrade()) { ArcPtr<Item>(item) => { item.value; }, None => {} }; }",
     ] {
         for end in 0..=source.len() {
@@ -1852,7 +1851,7 @@ fn indexing_keeps_editor_types_and_shader_functions_have_no_bytecode_property() 
     );
     for body in ["kernel.", "let mut alias = kernel; alias."] {
         let source = format!(
-            "@compute_shader fn kernel(index: u64, output: Ptr<u32>)  {{}} fn main()  {{ {body} }}"
+            "@compute_shader fn kernel(index: u64, output: PtrMut<u32>)  {{}} fn main()  {{ {body} }}"
         );
         let project = Project::new(&[("main.resin", &source)]);
         let items = project.build_hir().completions(
@@ -2098,7 +2097,7 @@ fn incomplete_impls_and_method_arguments_keep_editor_recovery() {
 #[test]
 fn pointer_replace_has_ordinary_method_hover_and_recovery() {
     for tail in ["", "p:;"] {
-        let source = format!("fn f(p: Ptr<i32>)  {{ p:replace(3); {tail} }}");
+        let source = format!("fn f(p: PtrMut<i32>)  {{ p:replace(3); {tail} }}");
         let project = Project::new(&[("main.resin", &source)]);
         let analysis = project.build_hir();
         let input = project.source("main.resin");
@@ -2111,7 +2110,7 @@ fn pointer_replace_has_ordinary_method_hover_and_recovery() {
         let offset = source.find("replace").unwrap();
         assert_eq!(
             analysis.hover(&input, offset).unwrap().text,
-            "replace: (Ptr<i32>, i32) -> i32"
+            "replace: (PtrMut<i32>, i32) -> i32"
         );
         let items = analysis.completions(
             &input,
@@ -2225,15 +2224,14 @@ fn literal_string_hover_preserves_its_distinct_primitive_type() {
 
 #[test]
 fn imported_intrinsics_keep_generic_navigation_and_declaration_signatures() {
-    let library = r#"export { at }; intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;"#;
-    let source =
-        "import { \"library.resin\" }; fn use(data: Ptr<u32>) -> Ptr<u32>  { at(data, 4, 2) }";
+    let library = r#"export { at }; intrinsic "pointer_index_mut" fn at<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;"#;
+    let source = "import { \"library.resin\" }; fn use(data: PtrMut<u32>) -> PtrMut<u32>  { at(data, 4, 2) }";
     let project = Project::new(&[("main.resin", source), ("library.resin", library)]);
     let analysis = project.checked();
     let input = project.source("main.resin");
     let offset = source.find("at(data").unwrap();
     let hover = analysis.hover(&input, offset).unwrap();
-    assert_eq!(hover.text, "at: (Ptr<u32>, u64, u64) -> Ptr<u32>");
+    assert_eq!(hover.text, "at: (PtrMut<u32>, u64, u64) -> PtrMut<u32>");
     let origin = analysis.definition(&input, offset).unwrap();
     assert_eq!(origin.source, project.source("library.resin"));
     assert_eq!(origin.span.start, library.find("fn at").unwrap() + 3);
@@ -2266,7 +2264,7 @@ fn lea_completion_requires_addressable_element_storage() {
     let offset = source.find("pointer:lea").unwrap() + "pointer:".len();
     assert_eq!(
         analysis.hover(&input, offset).unwrap().text,
-        "lea: (Ptr<[i32; 2]>, u64) -> Ptr<i32>"
+        "lea: (PtrMut<[i32; 2]>, u64) -> PtrMut<i32>"
     );
 }
 

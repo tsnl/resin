@@ -125,9 +125,9 @@ pub enum Instr {
     GpuViewStore,
     /// `[view, element] -> [element]`: exchange plain storage after checking read/write access.
     GpuViewReplace,
-    /// `[view, count, destination: Ptr<T>, destination_length] -> [unit]`: check and copy readable elements.
+    /// `[view, count, destination: PtrMut<T>, destination_length] -> [unit]`: check and copy readable elements.
     GpuViewCopyTo,
-    /// `[view, capacity, source: Ptr<T>, count] -> [unit]`: check and copy into writable elements.
+    /// `[view, capacity, source: PtrMut<T>, count] -> [unit]`: check and copy into writable elements.
     GpuViewCopyFrom,
     /// `[view, length, commands, image] -> [int]`: record an image copy retaining its allocation.
     GpuViewCopyImage,
@@ -189,7 +189,7 @@ pub enum Instr {
     /// `[count, initial] -> [StrongOwner | None]`: allocate repeated, implicitly copyable values.
     /// Installs the concrete element destructor; failed allocations publish no owner.
     OwnerAllocate { element: Ty },
-    /// `[Ref<StrongOwner>] -> [Ptr<T>]`: borrow live payload storage.
+    /// `[Ref<StrongOwner>] -> [PtrMut<T>]`: borrow live payload storage.
     OwnerData { pointee: Ty },
     /// `[Ref<StrongOwner>] -> [ulong]`: read the immutable element count.
     OwnerLength,
@@ -233,7 +233,7 @@ pub enum Instr {
     Push { value: Value },
     /// `[] -> [RefMut<T>]`: borrow a local's storage without reading or initializing it.
     LocalRef { local: LocalId },
-    /// `[Ptr<T>] -> [RefMut<T>]`: borrow a pointee, discarding pointer capabilities.
+    /// `[PtrMut<T>] -> [RefMut<T>]`: borrow a pointee, discarding pointer capabilities.
     Borrow,
     /// `[RefMut<T>] -> [Ref<T>]`: relinquish write permission on this reference.
     /// Other aliases retain their own permissions.
@@ -245,13 +245,13 @@ pub enum Instr {
     /// Array addresses and string literals produce borrowed element addresses;
     /// array values copy the element and destroy the consumed array.
     AccessDynamic,
-    /// `[Ptr<T>, length, index] -> [Ptr<T>]`: typed element addressing; the host
+    /// `[PtrMut<T>, length, index] -> [PtrMut<T>]`: typed element addressing; the host
     /// diagnoses an index outside length, while shaders require a valid index.
     PointerIndex,
-    /// `[Ptr<T>, capacity, start, count] -> [Ptr<T>]`: check and address a range.
+    /// `[PtrMut<T>, capacity, start, count] -> [PtrMut<T>]`: check and address a range.
     /// An empty range may start one past the end. Host-only.
     PointerRange,
-    /// `[Ptr<numeric>, count] -> [{data: Ptr<ubyte>, length: ulong}]`.
+    /// `[PtrMut<numeric>, count] -> [{data: PtrMut<ubyte>, length: ulong}]`.
     /// Checks byte-count overflow. Host-only.
     PointerBytes,
     /// `[address] -> [value]`: copy an initialized pointee, retaining managed owners.
@@ -345,7 +345,7 @@ pub struct Module {
     pub functions: Vec<Function>,
     /// Decorated shader candidates and whether their static artifact is requested.
     pub shaders: BTreeMap<FunctionId, ShaderEntry>,
-    /// Borrowed text representations: Ptr<Nominal> -> the primitive byte view.
+    /// Borrowed text representations: PtrMut<Nominal> -> the primitive byte view.
     pub text_views: BTreeMap<TypeId, FunctionId>,
     /// Optional source origins; direct IR clients may leave this empty.
     pub origins: SourceMap,

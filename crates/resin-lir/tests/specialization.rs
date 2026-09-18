@@ -152,6 +152,7 @@ fn growing_recursive_requests_fail_with_a_bounded_application_trace() {
     hir.functions[0].body = Some(block([reference(
         0,
         Type::Pointer {
+            mutable: true,
             pointee: Box::new(Type::Parameter { parameter: T }),
         },
     )]));
@@ -336,6 +337,7 @@ fn type_expansion_has_a_separate_guard_from_the_function_allowance() {
     hir.functions[0].body = Some(block([reference(
         0,
         Type::Pointer {
+            mutable: true,
             pointee: Box::new(Type::Parameter { parameter: T }),
         },
     )]));
@@ -464,6 +466,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
         fields: vec![resin_hir::RecordField {
             name: "next".into(),
             ty: Type::Pointer {
+                mutable: true,
                 pointee: Box::new(Type::Defined {
                     arguments: vec![],
                     definition: TypeId::from_index(2),
@@ -492,6 +495,7 @@ fn explicit_root_arguments_normalize_and_preserve_recursive_nominal_identity() {
             fields: vec![resin_types::RecordField {
                 name: "next".into(),
                 ty: Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(Ty::Defined {
                         definition: TypeId::from_index(0)
                     })
@@ -507,6 +511,7 @@ fn add_shader(hir: &mut Module, body: Term) -> usize {
     for (binding, ty) in [
         Type::UInt64,
         Type::Pointer {
+            mutable: true,
             pointee: Box::new(Type::UInt32),
         },
     ]
@@ -621,6 +626,7 @@ fn nominal_expansion_is_bounded_across_declaration_boundaries() {
                 fields: vec![resin_hir::RecordField {
                     name: "next".into(),
                     ty: Type::Pointer {
+                        mutable: true,
                         pointee: Box::new(Type::Defined {
                             arguments: vec![],
                             definition: TypeId::from_index((index + 1) % 300),
@@ -719,6 +725,7 @@ fn nominal_instances_substitute_fields_and_close_recursive_edges() {
             resin_hir::RecordField {
                 name: "next".into(),
                 ty: Type::Pointer {
+                    mutable: true,
                     pointee: Box::new(nominal(Type::Parameter { parameter: U })),
                 },
             },
@@ -736,6 +743,7 @@ fn nominal_instances_substitute_fields_and_close_recursive_edges() {
         assert_eq!(
             fields[1].ty,
             Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::Defined {
                     definition: TypeId::from_index(index)
                 })
@@ -791,7 +799,9 @@ fn nominal_recursion_with_growing_arguments_reports_a_type_limit() {
         fields: vec![resin_hir::RecordField {
             name: "next".into(),
             ty: Type::Pointer {
+                mutable: true,
                 pointee: Box::new(nominal(Type::Pointer {
+                    mutable: true,
                     pointee: Box::new(Type::Parameter { parameter: U }),
                 })),
             },
@@ -1007,6 +1017,7 @@ fn member_types_and_field_indices_are_determined_from_concrete_receivers() {
         name: "value".into(),
     };
     let pointer = Type::Pointer {
+        mutable: true,
         pointee: Box::new(t),
     };
     let name = Ident::new("receiver".into(), SPAN);
@@ -1094,10 +1105,12 @@ fn conversions_select_the_concrete_operation_after_substitution() {
         (Type::UInt8, Instr::NumericCast { ty: Ty::UInt8 }),
         (
             Type::Pointer {
+                mutable: true,
                 pointee: Box::new(Type::UInt8),
             },
             Instr::PointerCast {
                 ty: Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(Ty::UInt8),
                 },
             },
@@ -1170,6 +1183,7 @@ fn generic_conversions_cannot_bypass_custom_destruction() {
         binding: Some(0),
         name,
         annotation: annotation(Type::Pointer {
+            mutable: true,
             pointee: Box::new(owner.clone()),
         }),
     });
@@ -1324,6 +1338,7 @@ fn growing_method_result_queries_are_bounded_before_exhausting_the_host_stack() 
     });
     let mut next = method_lookup(method_owner());
     next.type_args = vec![Type::Pointer {
+        mutable: true,
         pointee: Box::new(Type::Parameter { parameter }),
     }];
     hir.functions[1].signature.result = annotation(method_result(next));

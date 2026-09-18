@@ -1,58 +1,118 @@
 //! Borrowed views of contiguous elements.
 //! Keep the backing storage alive; a span does not retain its owner.
 
-export { Span, bytes, at, at_mut, lea, slice, as_bytes, clone };
+export { Span, SpanMut, load, store, read_only, bytes, at, at_mut, lea, slice, as_bytes, clone };
 
-// Borrowed storage. The caller keeps the allocation alive throughout each access.
-/// A nonowning pointer and element count. Bounds are checked on the host.
-/// Shader accesses are unchecked; keep indices within the declared length.
+/// A borrowed, read-only pointer and element count.
+/// Host indexing checks bounds; shader indexing requires an in-range index.
 struct Span<T> {
 	data: Ptr<T>,
 	length: u64,
-
-	// Primitive byte transport for formatting and native interfaces.
 }
-/// Borrow the element at `index` without granting an address.
+
+/// A borrowed, writable pointer and element count. Aliases may share the storage.
+/// Host indexing checks bounds; shader indexing requires an in-range index.
+struct SpanMut<T> {
+	data: PtrMut<T>,
+	length: u64,
+}
+
+//
+// Read-only access
+//
+
 fn at<T>(self: Ref<Span<T>>, index: u64) -> Ref<T> {
-	self:lea(index).*
+	pointer_index_read(self.data, self.length, index).*
 }
 
-/// Borrow a writable element; the span descriptor itself is only read.
-fn at_mut<T>(self: Ref<Span<T>>, index: u64) -> RefMut<T> {
-	self:lea(index).*
-}
-
-/// Obtain a pointer to an element of the already pointer-backed span.
 fn lea<T>(self: Ref<Span<T>>, index: u64) -> Ptr<T> {
-	pointer_index(self.data, self.length, index)
+	pointer_index_read(self.data, self.length, index)
 }
 
 fn slice<T>(self: Ref<Span<T>>, start: u64, length: u64) -> Span<T> {
-	Span<T> {
+	Span<T> { data = pointer_range_read(self.data, self.length, start, length), length = length }
+}
+
+fn as_bytes<T>(self: Ref<Span<T>>) -> Span<u8> {
+	let raw = self:bytes();
+	Span<u8> { data = raw.0, length = raw.1 }
+}
+
+fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<u8>, u64) {
+	pointer_bytes_read(self.data, self.length)
+}
+
+fn clone<T>(value: Ref<Span<T>>) -> Span<T> {
+	Span<T> { data = value.data, length = value.length }
+}
+
+//
+// Writable access
+//
+
+/// Borrow the element at `index` without granting an address.
+fn at<T>(self: Ref<SpanMut<T>>, index: u64) -> Ref<T> {
+	pointer_index(self.data, self.length, index).*
+}
+
+/// Borrow a writable element; the span descriptor itself is only read.
+fn at_mut<T>(self: Ref<SpanMut<T>>, index: u64) -> RefMut<T> {
+	pointer_index(self.data, self.length, index).*
+}
+
+/// Obtain a pointer to an element of the already pointer-backed span.
+fn lea<T>(self: Ref<SpanMut<T>>, index: u64) -> PtrMut<T> {
+	pointer_index(self.data, self.length, index)
+}
+
+fn slice<T>(self: Ref<SpanMut<T>>, start: u64, length: u64) -> SpanMut<T> {
+	SpanMut<T> {
 		data = pointer_range(self.data, self.length, start, length),
 		length = length,
 	}
 }
 
-fn as_bytes<T>(self: Ref<Span<T>>) -> Span<u8> {
-	let mut raw = self:bytes();
-	Span<u8> { data = raw.0, length = raw.1 }
+fn as_bytes<T>(self: Ref<SpanMut<T>>) -> SpanMut<u8> {
+	let raw = pointer_bytes(self.data, self.length);
+	SpanMut<u8> { data = raw.0, length = raw.1 }
 }
 
-fn bytes<T>(self: Ref<Span<T>>) -> (Ptr<u8>, u64) {
-	pointer_bytes(self.data, self.length)
+fn bytes<T>(self: Ref<SpanMut<T>>) -> (Ptr<u8>, u64) {
+	pointer_bytes_read(self.data, self.length)
 }
 
-// Literal length excludes the NUL terminator; borrowing never copies the bytes.
+fn clone<T>(value: Ref<SpanMut<T>>) -> SpanMut<T> {
+	SpanMut<T> { data = value.data, length = value.length }
+}
+
+/// Borrow a read-only view without changing other aliases.
+fn read_only<T>(self: Ref<SpanMut<T>>) -> Span<T> {
+	Span<T> { data = self.data, length = self.length }
+}
+
 /// Borrow the bytes of a string literal, excluding its NUL terminator.
 fn bytes(text: str) -> Span<u8> {
 	Span<u8> { data = text.data, length = text.length }
 }
 
-intrinsic "pointer_index" fn pointer_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
-intrinsic "pointer_range" fn pointer_range<T>(data: Ptr<T>, capacity: u64, start: u64, length: u64) -> Ptr<T>;
-intrinsic "pointer_bytes" fn pointer_bytes<T>(data: Ptr<T>, length: u64) -> (Ptr<u8>, u64);
-
-fn clone<T>(value: Ref<Span<T>>) -> Span<T> {
-	Span<T> { data = value.data, length = value.length }
+// Value access shared with GPU storage algorithms.
+fn load<T>(self: Ref<Span<T>>, index: u64) -> T {
+	self:at(index)
 }
+fn load<T>(self: Ref<SpanMut<T>>, index: u64) -> T {
+	self:at(index)
+}
+fn store<T>(self: Ref<SpanMut<T>>, index: u64, value: T) {
+	self:at_mut(index) = value;
+}
+
+//
+// Compiler operations
+//
+
+intrinsic "pointer_index" fn pointer_index_read<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_range" fn pointer_range_read<T>(data: Ptr<T>, capacity: u64, start: u64, length: u64) -> Ptr<T>;
+intrinsic "pointer_bytes" fn pointer_bytes_read<T>(data: Ptr<T>, length: u64) -> (Ptr<u8>, u64);
+intrinsic "pointer_index_mut" fn pointer_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;
+intrinsic "pointer_range_mut" fn pointer_range<T>(data: PtrMut<T>, capacity: u64, start: u64, length: u64) -> PtrMut<T>;
+intrinsic "pointer_bytes_mut" fn pointer_bytes<T>(data: PtrMut<T>, length: u64) -> (PtrMut<u8>, u64);

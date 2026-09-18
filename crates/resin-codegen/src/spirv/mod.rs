@@ -191,7 +191,7 @@ fn register_function_types(
     {
         match ty {
             Ty::Function { .. } => continue,
-            Ty::Pointer { pointee }
+            Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             } => context.validate(pointee)?,
@@ -204,7 +204,7 @@ fn register_function_types(
 
 fn str_storage_error() -> Error {
     Error::unsupported(
-        "shader string literals need device-backed storage; pass a Span<u8> in the shader root"
+        "shader string literals need device-backed storage; pass a SpanMut<u8> in the shader root"
             .into(),
     )
 }

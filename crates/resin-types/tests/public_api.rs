@@ -15,6 +15,7 @@ fn recursive_records_share_one_table_for_conversions_and_layout() {
             RecordField {
                 name: "next".into(),
                 ty: Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(node.clone()),
                 },
             },

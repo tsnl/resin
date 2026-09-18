@@ -35,7 +35,7 @@ fn shader_operations_require_the_actual_shared_state_and_cannot_trap() {
     ] {
         let source = format!(
             r#"import {{ "$/workgroup.resin" }};
-            @compute_shader fn kernel(index: u64, root: Ptr<u32>, group: Workgroup<u32>) {{ {body} }}"#
+            @compute_shader fn kernel(index: u64, root: PtrMut<u32>, group: Workgroup<u32>) {{ {body} }}"#
         );
         let module = support::module(&source);
         let error = match support::project::Project::new(&module, None) {
@@ -50,11 +50,12 @@ fn shader_operations_require_the_actual_shared_state_and_cannot_trap() {
 fn invalid_workgroup_parameters_and_oversized_state_are_diagnosed() {
     for state in [
         "Ref<u32>".to_owned(),
-        "Ptr<u32>".to_owned(),
+        "PtrMut<u32>".to_owned(),
         format!("RefMut<({})>", vec!["u32"; 2049].join(",")),
     ] {
-        let source =
-            format!("@compute_shader fn kernel(index: u64, root: Ptr<u32>, group: {state}) {{}}");
+        let source = format!(
+            "@compute_shader fn kernel(index: u64, root: PtrMut<u32>, group: {state}) {{}}"
+        );
         let error = support::pipeline::source_module(&source)
             .unwrap_err()
             .to_string();
@@ -143,7 +144,7 @@ const TYPED_PIPELINE: &str = r#"
     import { "$/workgroup.resin", "$/gpu.resin" };
     struct Root<T> { output: T }
     @compute_shader
-    fn kernel(index: u64, root: Ptr<Root<Ptr<u32>>>, group: Workgroup<u32>) {
+    fn kernel(index: u64, root: PtrMut<Root<PtrMut<u32>>>, group: Workgroup<u32>) {
         if (group:lane_index() == 0) { group = u32(41); };
         group:sync();
         if (group:lane_index() == 0) { root.output.* = group + u32(1); };
@@ -164,7 +165,7 @@ const PHASES: &str = r#"
     export { kernel, main };
     import { "$/workgroup.resin", "$/span.resin" };
     struct State { value: u32, ready: bool }
-    struct Root { output: Span<f32> }
+    struct Root { output: SpanMut<f32> }
     fn phase(group: Workgroup<State>) {
         if (group:lane_index() == 0) {
             group.value = group.value + u32(1);
@@ -173,7 +174,7 @@ const PHASES: &str = r#"
         group:sync();
     }
     @compute_shader
-    fn kernel(index: u64, root: Ptr<Root>, group: Workgroup<State>) {
+    fn kernel(index: u64, root: PtrMut<Root>, group: Workgroup<State>) {
         let mut round = u32(0);
         while (round < u32(3)) { phase(group); round = round + u32(1); };
         root.output:at_mut(index) = if (group.ready) { f32(group.value) } else { f32(0) };

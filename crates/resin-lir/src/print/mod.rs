@@ -453,7 +453,7 @@ fn sexp_ty(names: &Names, ty: &Ty) -> SExp {
             if *mutable { "ref-mut" } else { "ref" },
             vec![sexp_ty(names, referent)],
         ),
-        Ty::Pointer { pointee } => list("ptr", vec![sexp_ty(names, pointee)]),
+        Ty::Pointer { pointee, .. } => list("ptr", vec![sexp_ty(names, pointee)]),
         Ty::GpuView => symbol("GpuView"),
         Ty::GpuPipelineContract => symbol("GpuPipelineContract"),
         Ty::GpuArguments => symbol("GpuArguments"),

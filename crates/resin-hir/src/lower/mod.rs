@@ -922,6 +922,7 @@ impl Generator {
         let shape = |ty: &crate::Type| {
             if matches!(ty, crate::Type::Pointer { .. }) {
                 Some(Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(Ty::Unit),
                 })
             } else {
@@ -1116,7 +1117,8 @@ impl Generator {
         match &ty {
             // Stage signatures constrain the root to be a pointer. Its pointee
             // layout is checked when LIR materializes the actual signature.
-            Type::Node(Head::Pointer, _) => Ok(Ty::Pointer {
+            Type::Node(Head::Pointer { mutable }, _) => Ok(Ty::Pointer {
+                mutable: *mutable,
                 pointee: Box::new(Ty::Unit),
             }),
             Type::Node(
@@ -1258,9 +1260,9 @@ mod extern_tests {
     fn preamble_signatures_resolve_types_declared_in_the_body() {
         let file = parse(
             r#"extern { "native.h": {
-                fn handle(value: Ptr<Handle>) -> Ptr<Handle>;
+                fn handle(value: PtrMut<Handle>) -> PtrMut<Handle>;
                 fn scalar(value: Scalar) -> Scalar;
-                fn cell(value: Ptr<Cell<i32>>) -> Ptr<Cell<i32>>;
+                fn cell(value: PtrMut<Cell<i32>>) -> PtrMut<Cell<i32>>;
             } };
             extern type Handle;
             type Scalar = i32;

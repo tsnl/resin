@@ -5,14 +5,14 @@ export { main };
 import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
 struct Payload { value: f32, }
 @ray_generation_shader
-fn generation(index: u64, output: Ptr<f32>) {
+fn generation(index: u64, output: PtrMut<f32>) {
     let hit = trace_ray(f32(0.0), f32(0.0), f32(-1.0), f32(0.0), f32(0.0), f32(1.0), f32(0.0), f32(100.0), Payload { value = f32(0.0) });
     output.* = hit.value;
 }
 @miss_shader
-fn miss(payload: Payload, output: Ptr<f32>) -> Payload { Payload { value = f32(-1.0) } }
+fn miss(payload: Payload, output: PtrMut<f32>) -> Payload { Payload { value = f32(-1.0) } }
 @closest_hit_shader
-fn closest(payload: Payload, output: Ptr<f32>) -> Payload {
+fn closest(payload: Payload, output: PtrMut<f32>) -> Payload {
     let info = ray_hit_info();
     Payload { value = info.0 }
 }
@@ -21,7 +21,7 @@ fn main() -> i32 | Err<_> {
         let gpu = gpu_new()?;
         let vertices = arc_ptr_alloc([f32(-1.0), f32(-1.0), f32(0.0), f32(1.0), f32(-1.0), f32(0.0), f32(0.0), f32(1.0), f32(0.0)])?;
         let transform = arc_ptr_alloc([f32(1.0), f32(0.0), f32(0.0), f32(0.0), f32(0.0), f32(1.0), f32(0.0), f32(0.0), f32(0.0), f32(0.0), f32(1.0), f32(0.0)])?;
-        let scene = gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transform:get():lea(0), length = 12 })?;
+        let scene = gpu:create_ray_scene(SpanMut<f32> { data = vertices:get():lea(0), length = 9 }, SpanMut<f32> { data = transform:get():lea(0), length = 12 })?;
         let pipeline = scene:create_ray_tracing_pipeline(generation, miss, closest)?;
         let commands = gpu:start_command_recording()?;
         let retained = pipeline:clone();
@@ -250,7 +250,7 @@ fn ray_stage_failures_unwind_helpers_and_loops_without_stopping_other_rays() {
             Payload { value = payload.value + 1 }
         }
         @ray_generation_shader
-        fn generation(index: u64, root: Ptr<Root<Span<f32>>>) {
+        fn generation(index: u64, root: PtrMut<Root<SpanMut<f32>>>) {
             let mut value: f32 = 0;
             let mut step = 0;
             while (step < 2) {
@@ -260,11 +260,11 @@ fn ray_stage_failures_unwind_helpers_and_loops_without_stopping_other_rays() {
             };
         }
         @miss_shader
-        fn miss(payload: Payload, root: Ptr<Root<Span<f32>>>) -> Payload {
+        fn miss(payload: Payload, root: PtrMut<Root<SpanMut<f32>>>) -> Payload {
             shade(payload, root.fail_stage == 2)
         }
         @closest_hit_shader
-        fn closest(payload: Payload, root: Ptr<Root<Span<f32>>>) -> Payload {
+        fn closest(payload: Payload, root: PtrMut<Root<SpanMut<f32>>>) -> Payload {
             shade(payload, root.fail_stage == 1)
         }
         fn main() -> i32 | Err<_> {
@@ -272,7 +272,7 @@ fn ray_stage_failures_unwind_helpers_and_loops_without_stopping_other_rays() {
             if (!gpu:supports_ray_tracing()) { return 0; };
             let vertices = arc_ptr_alloc([f32(-1), -1, 0, 1, -1, 0, 0, 1, 0])?;
             let transform = arc_ptr_alloc([f32(1), 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0])?;
-            let scene = gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transform:get():lea(0), length = 12 })?;
+            let scene = gpu:create_ray_scene(SpanMut<f32> { data = vertices:get():lea(0), length = 9 }, SpanMut<f32> { data = transform:get():lea(0), length = 12 })?;
             let pipeline = scene:create_ray_tracing_pipeline(generation, miss, closest)?;
             let output = gpu:alloc::<f32>(9)?;
             let mut stage: u32 = 0;
@@ -280,7 +280,7 @@ fn ray_stage_failures_unwind_helpers_and_loops_without_stopping_other_rays() {
                 let mut i: u64 = 0;
                 while (i < 9) { let element = output:at(i); element:store(f32(42)); i = i + 1; };
                 let commands = gpu:start_command_recording()?;
-                commands:trace_rays(pipeline, Root<GpuSpan<f32>> { output = output:clone(), fail_stage = stage }, 2, 2, 2)?;
+                commands:trace_rays(pipeline, Root<GpuSpanMut<f32>> { output = output:clone(), fail_stage = stage }, 2, 2, 2)?;
                 commands:submit()?;
                 i = 0;
                 while (i < 8) {

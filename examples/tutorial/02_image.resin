@@ -1,10 +1,10 @@
 export { main };
-import { "fractal.resin", "$/image.resin", "$/shared.resin" };
+import { "fractal.resin", "$/image.resin", "$/shared.resin", "$/span.resin" };
 
 // ANCHOR: image
 fn main() -> () | Err<_> {
 	let pixels = render(320, 240)?;
 	let view = pixels:get();
-	image_data_write_pixels("mandelbrot.png".data, 320, 240, 4, view, 0)?;
+	image_data_write_pixels("mandelbrot.png".data, 320, 240, 4, view:read_only(), 0)?;
 }
 // ANCHOR_END: image

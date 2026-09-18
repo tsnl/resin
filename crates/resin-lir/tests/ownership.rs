@@ -40,6 +40,7 @@ fn owned_field_paths_only_traverse_inline_record_fields() {
         (record.clone(), vec![1]),
         (
             Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(record.clone()),
             },
             vec![0],

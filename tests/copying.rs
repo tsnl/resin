@@ -44,7 +44,7 @@ fn value_arguments_and_borrowed_reads_copy_nested_structs() {
 fn implicit_arc_copies_retain_move_only_payloads_through_calls_and_aggregates() {
     succeeds(
         r#"export { main }; import { "$/shared.resin", "$/span.resin" };
-        struct Resource { drops: Ptr<i32> }
+        struct Resource { drops: PtrMut<i32> }
         fn drop(value: RefMut<Resource>) { value.drops.* = value.drops.* + 1; }
         struct Holder<T> { value: T }
         fn pass<T>(value: T) -> T { value }
@@ -90,7 +90,7 @@ fn implicit_arc_copies_retain_move_only_payloads_through_calls_and_aggregates() 
 fn repeated_allocation_copies_structs_and_retains_shared_fields() {
     succeeds(
         r#"export { main }; import { "$/shared.resin", "$/span.resin" };
-        struct Resource { drops: Ptr<i32> }
+        struct Resource { drops: PtrMut<i32> }
         fn drop(value: RefMut<Resource>) { value.drops.* = value.drops.* + 1; }
         struct Holder { owner: ArcPtr<Resource>, number: i32 }
         fn main() -> i32 | Err<_> {
@@ -155,10 +155,10 @@ fn phantom_box_propagates_move_only_ownership_without_a_struct_annotation() {
 fn extracting_a_move_only_field_from_a_temporary_transfers_its_cleanup() {
     succeeds(
         r#"export { main }; import { "$/shared.resin" };
-        struct Resource { drops: Ptr<i32> }
+        struct Resource { drops: PtrMut<i32> }
         fn drop(value: RefMut<Resource>) { value.drops.* = value.drops.* + 1; }
         struct Pair { first: Resource, second: Resource }
-        fn make(drops: Ptr<i32>) -> Pair {
+        fn make(drops: PtrMut<i32>) -> Pair {
             Pair { first = Resource { drops = drops }, second = Resource { drops = drops } }
         }
         fn main() -> i32 | Err<_> {

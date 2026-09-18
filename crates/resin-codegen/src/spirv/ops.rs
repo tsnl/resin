@@ -114,7 +114,7 @@ pub(super) fn instruction(
         }
         Instr::MakeVariant { ty, tag } => variant(context, ty, tag, args[0].id)?,
         Instr::IsVariant { tag } => {
-            if let Ty::Pointer { pointee }
+            if let Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             } = &args[0].ty
@@ -139,7 +139,7 @@ pub(super) fn instruction(
             return project(context, &args[0], *index, result.unwrap()).map(Some);
         }
         Instr::PointerIndex => {
-            let Ty::Pointer { pointee } = &args[0].ty else {
+            let Ty::Pointer { pointee, .. } = &args[0].ty else {
                 unreachable!("verified pointer indexing")
             };
             let size = crate::layout::layout(context.module, pointee)?.size;
@@ -213,7 +213,7 @@ fn local_pointer(
 }
 
 fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
-    let (Ty::Pointer { pointee }
+    let (Ty::Pointer { pointee, .. }
     | Ty::Reference {
         referent: pointee, ..
     }) = &slot.ty
@@ -229,7 +229,7 @@ fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
 }
 
 fn store(context: &mut Context<'_>, slot: &Slot, value: Word) -> Result<(), Error> {
-    let (Ty::Pointer { pointee }
+    let (Ty::Pointer { pointee, .. }
     | Ty::Reference {
         referent: pointee, ..
     }) = &slot.ty
@@ -280,7 +280,7 @@ fn project(
             local: Some(local),
         });
     }
-    let id = if let Ty::Pointer { pointee }
+    let id = if let Ty::Pointer { pointee, .. }
     | Ty::Reference {
         referent: pointee, ..
     } = &base.ty
@@ -313,7 +313,7 @@ fn index(
         });
     }
     let (address, element) = match context.shape(&base.ty).clone() {
-        Ty::Pointer { pointee }
+        Ty::Pointer { pointee, .. }
         | Ty::Reference {
             referent: pointee, ..
         } => {

@@ -1396,7 +1396,11 @@ fn mutable_place(term: &Term) -> bool {
     match &term.kind {
         TermKind::Local { mutable, .. } => *mutable,
         TermKind::Use { arg } => mutable_place(arg),
-        TermKind::Deref { pointer } => mutable_access(&pointer.ty).unwrap_or(false),
+        TermKind::Deref { pointer } => matches!(
+            &pointer.ty,
+            crate::Type::Pointer { mutable: true, .. }
+                | crate::Type::Reference { mutable: true, .. }
+        ),
         TermKind::Field { base, .. } => {
             mutable_access(&base.ty).unwrap_or_else(|| mutable_place(base))
         }
@@ -1407,7 +1411,9 @@ fn mutable_place(term: &Term) -> bool {
 // Loading a pointer field starts access under that pointer's own contract.
 fn mutable_access(ty: &crate::Type) -> Option<bool> {
     match ty {
-        crate::Type::Pointer { pointee } => Some(mutable_access(pointee).unwrap_or(true)),
+        crate::Type::Pointer { pointee, mutable } => {
+            Some(mutable_access(pointee).unwrap_or(*mutable))
+        }
         crate::Type::Reference { referent, mutable } => {
             Some(mutable_access(referent).unwrap_or(*mutable))
         }

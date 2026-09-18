@@ -41,7 +41,7 @@ fn dependent_reference_results_cannot_be_turned_into_pointers() {
         r#"export { main };
         struct Cell { value: i32 }
         fn get(cell: Ref<Cell>) -> Ref<i32> { cell.value }
-        fn address<T>(cell: Ref<T>) -> Ptr<i32> { &cell:get() }
+        fn address<T>(cell: Ref<T>) -> PtrMut<i32> { &cell:get() }
         fn main() { let cell = Cell { value = 1 }; address(cell); }
         "#,
     )
@@ -133,7 +133,7 @@ import { "$/shared.resin" };
         fn main() -> i32 | Err<_> {
             let a_owner = arc_ptr_alloc(i32(1))?; let a: Ref<_> = a_owner:get().*; let b_owner = arc_ptr_alloc(i32(2))?; let b: Ref<_> = b_owner:get().*;
             let mut pointer = a_owner:get();
-            let mut slot: RefMut<Ptr<i32>> = pointer;
+            let mut slot: RefMut<PtrMut<i32>> = pointer;
             slot = b_owner:get();
             slot.* = 41;
             a + pointer.*
@@ -151,7 +151,7 @@ fn references_borrow_managed_storage_and_replacements_destroy_the_old_value() {
             r#"export { main };
 import { "$/shared.resin" };
 
-        struct Resource { drops: Ptr<i32>,
+        struct Resource { drops: PtrMut<i32>,
             
         }
 fn drop(self: RefMut<Resource>)  { self.drops.* = self.drops.* + 1; }
@@ -210,7 +210,7 @@ fn take(self: Ref<Cell>, value: Ref<i32>)  {}
 
 #[test]
 fn shaders_cannot_return_references_to_their_own_locals() {
-    let source = "export { kernel }; fn local() -> Ref<u32> { let mut value: u32 = 1; value } @compute_shader fn kernel(i: u64, output: Ptr<u32>) { output.* = local(); }";
+    let source = "export { kernel }; fn local() -> Ref<u32> { let mut value: u32 = 1; value } @compute_shader fn kernel(i: u64, output: PtrMut<u32>) { output.* = local(); }";
     let error = support::pipeline::shader_error(source);
     assert!(
         error.to_string().contains("cannot return a local address"),
@@ -246,8 +246,8 @@ fn specialization_keeps_pointer_field_access_and_rejects_local_field_addresses()
         result(
             r#"export { main }; import { "$/shared.resin" };
         struct Cell { value: i32 }
-        fn address<T>(value: T) -> Ptr<i32> { &value.value }
-        fn borrowed<T>(value: Ref<T>) -> Ptr<i32> { &value.value }
+        fn address<T>(value: T) -> PtrMut<i32> { &value.value }
+        fn borrowed<T>(value: Ref<T>) -> PtrMut<i32> { &value.value }
         fn main() -> i32 | Err<_> {
             let owner = arc_ptr_alloc(Cell { value = 1 })?;
             address(owner:get()).* = 20;
@@ -263,7 +263,7 @@ fn specialization_keeps_pointer_field_access_and_rejects_local_field_addresses()
         let error = support::pipeline::source_module(&format!(
             r#"export {{ main }};
             struct Cell {{ value: i32 }}
-            fn address<T>(value: {parameter}) -> Ptr<i32> {{ &value.value }}
+            fn address<T>(value: {parameter}) -> PtrMut<i32> {{ &value.value }}
             fn main() {{ let cell = Cell {{ value = 1 }}; address(cell); }}
         "#
         ))

@@ -40,12 +40,12 @@ fn returns_drop_owners_once_in_reverse_order_and_preserve_the_result() {
         r#"export { main };
 import { "$/shared.resin" };
 
-        struct Resource { trace: Ptr<i32>, digit: i32,
+        struct Resource { trace: PtrMut<i32>, digit: i32,
             
         }
 fn drop(self: RefMut<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
-        fn leave(trace: Ptr<i32>) -> i32  {
+        fn leave(trace: PtrMut<i32>) -> i32  {
             let mut first = Resource { trace = trace, digit = 1 };
             { let mut second = Resource { trace = trace, digit = 2 }; return 42; };
         }
@@ -77,7 +77,7 @@ fn return_values_are_checked_even_in_unused_functions() {
 #[test]
 fn shader_returns_preserve_structured_selection_and_loops() {
     let module = support::module(
-        "export { kernel }; @compute_shader fn kernel(i: u64, output: Ptr<u32>)  { if (i != u64(0)) { return; }; while (i == u64(0)) { output.* = u32(42); return; }; }",
+        "export { kernel }; @compute_shader fn kernel(i: u64, output: PtrMut<u32>)  { if (i != u64(0)) { return; }; while (i == u64(0)) { output.* = u32(42); return; }; }",
     );
     let project = support::project::Project::new(&module, None).unwrap();
     support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
@@ -89,7 +89,7 @@ fn loop_exits_target_the_nearest_loop_and_drop_exited_scopes() {
         r#"export { main };
 import { "$/shared.resin" };
 
-        struct Resource { trace: Ptr<i32>, digit: i32,
+        struct Resource { trace: PtrMut<i32>, digit: i32,
             
         }
 fn drop(self: RefMut<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
@@ -139,7 +139,7 @@ fn loop_exits_do_not_hide_initialization_errors_or_escape_conditions() {
 #[test]
 fn shader_loop_exits_preserve_structured_merges() {
     let module = support::module(
-        "export { kernel }; @compute_shader fn kernel(i: u64, output: Ptr<u32>)  { let mut n: u32 = 0; while (n < u32(8)) { n = n + u32(1); if (n == u32(2)) { continue; }; while (true) { if (n == u32(4)) { break; }; break; }; if (n > u32(5)) { break; }; output.* = n; }; }",
+        "export { kernel }; @compute_shader fn kernel(i: u64, output: PtrMut<u32>)  { let mut n: u32 = 0; while (n < u32(8)) { n = n + u32(1); if (n == u32(2)) { continue; }; while (true) { if (n == u32(4)) { break; }; break; }; if (n > u32(5)) { break; }; output.* = n; }; }",
     );
     let project = support::project::Project::new(&module, None).unwrap();
     support::shaders::validate(project.generated.shaders()[0].unoptimized_spirv());
