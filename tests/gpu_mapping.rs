@@ -101,6 +101,8 @@ fn explicit_addresses_support_nested_graphs_mapping_and_workgroups() {
 #[test]
 fn mapping_preserves_permissions_and_rejects_managed_payloads() {
     for source in [
+        "fn bad(p: Ref<GpuPtr<u32>>) { p:slice(0, 1); }",
+        "fn bad(p: Ref<GpuPtrMut<u32>>) { p:slice(0, 1); }",
         "fn bad(p: Ref<GpuPtr<u32>>) -> PtrMut<u32> | Err<_> { p:map() }",
         "fn bad(p: Ref<GpuSpan<u32>>) -> SpanMut<u32> | Err<_> { p:map() }",
         "fn bad(p: Ref<GpuPtr<u32>>) -> PtrMut<u32> { p:device() }",

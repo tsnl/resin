@@ -5,6 +5,6 @@ import { "fractal.resin", "$/image.resin", "$/shared.resin", "$/span.resin" };
 fn main() -> () | Err<_> {
 	let pixels = render(320, 240)?;
 	let view = pixels:get();
-	image_data_write_pixels("mandelbrot.png".data, 320, 240, 4, view:read_only(), 0)?;
+	image_data_write_pixels(bytes("mandelbrot.png"), 320, 240, 4, view:read_only(), 0)?;
 }
 // ANCHOR_END: image

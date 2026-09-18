@@ -2,20 +2,17 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-intrinsic "pointer_index_mut" fn device_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;
-
 struct Root {
-	count: u32,
 	iterations: u32,
-	input: PtrMut<u32>,
-	output: PtrMut<u32>,
+	input: Span<u32>,
+	output: SpanMut<u32>,
 }
 
 // Each lane follows a different, data-dependent branch on every iteration.
 // Keep this recurrence stable: it is the structured-control-flow baseline.
 @compute_shader
-fn kernel(index: u64, root: PtrMut<Root>) {
-	if (index < u64(root.count)) {
+fn kernel(index: u64, root: Ptr<Root>) {
+	if (index < root.output.length) {
 		let mut lane = u32(index);
 		let mut x = lane * u32(747796405) + u32(2891336453);
 		let mut n: u32 = 0;
@@ -28,14 +25,13 @@ fn kernel(index: u64, root: PtrMut<Root>) {
 			x = (x ^ (x * u32(65521))) + u32(1013904223);
 			n = n + u32(1);
 		};
-		let mut output = SpanMut<u32> { data = root.output, length = u64(root.count) };
-		device_index(output.data, output.length, index).* = x;
+		root.output:at_mut(index) = x;
 	};
 }
 
-fn cpu(root: PtrMut<Root>) {
+fn cpu(root: Ptr<Root>) {
 	let mut index: u64 = 0;
-	while (index < u64(root.count)) {
+	while (index < root.output.length) {
 		kernel(index, root);
 		index = index + u64(1);
 	};

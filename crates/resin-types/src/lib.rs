@@ -775,7 +775,7 @@ impl TypeError {
 impl fmt::Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.kind == TypeErrorKind::PointerArithmetic {
-            return f.write_str("pointer arithmetic is not allowed; index a Span or explicitly convert the pointer to u64 for byte arithmetic");
+            return f.write_str("pointer arithmetic is not allowed; use :lea(index) on a span or pointer to an array");
         }
         if matches!(self.kind, TypeErrorKind::UnwrapManaged { .. }) {
             return f.write_str("cannot unwrap a type with drop; access its fields through a pointer or use Ptr.replace");

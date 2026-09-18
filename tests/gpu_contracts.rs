@@ -217,7 +217,7 @@ fn source_gpu_library_resolves_generic_allocation_and_explicit_access() {
             let mut values = gpu:alloc::<i32>(u64(4))?;
             { let borrowed = values:at(u64(1)); borrowed:store(i32(7)) };
             let mut tail = values:slice(u64(1), u64(2));
-            let mut alias = tail.data:slice(u64(1), u64(1));
+            let mut alias = tail:slice(u64(1), u64(1));
             let output_owner = arc_ptr_alloc([i32(0), i32(0)])?; let output: Ref<_> = output_owner:get().*;
             { let borrowed = tail:read_only(); borrowed:copy_to(SpanMut<i32> { data = output_owner:get():lea(u64(0)), length = u64(2) }) };
             let mut readback = gpu:alloc_in::<u8>(u64(64), memory_readback)?;

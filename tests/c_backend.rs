@@ -245,7 +245,7 @@ fn inferred_types_lower_to_concrete_c_and_preserve_effect_order() {
 #[test]
 fn array_and_span_indexing_use_element_sizes() {
     runs(
-        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main () -> i32 | Err<_> { let values_owner = arc_ptr_alloc([10, 20, 30])?; let values: RefMut<_> = values_owner:get().*; let mut p = SpanMut<i32> { data = PtrMut<i32>(values_owner:get()), length = u64(3) }; p:at_mut(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main () -> i32 | Err<_> { let values_owner = arc_ptr_alloc([10, 20, 30])?; let values: RefMut<_> = values_owner:get().*; let mut p = SpanMut<i32> { data = values_owner:get():lea(0), length = u64(3) }; p:at_mut(1) = 7; let mut end = p:at(2); p:at(1) + values(0) + end }",
         47,
     );
     runs(
@@ -736,7 +736,7 @@ fn indexing_addresses_evaluate_receiver_and_index_once() {
         fn index(calls: PtrMut<i32>) -> i32  { calls.* = calls.* + 1; 1 }
         fn main() -> i32 | Err<_> {
             let values_owner = arc_ptr_alloc([i32(10), 20, 30])?; let values: RefMut<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
-            let span = view(PtrMut<i32>(values_owner:get()), calls_owner:get());
+            let span = view(values_owner:get():lea(0), calls_owner:get());
             let mut p: PtrMut<i32>; p = span:lea(u64(index(calls_owner:get())));
             p.* = 42;
             let mut copied = values;
@@ -763,11 +763,11 @@ struct Holder { values: SpanMut<i32>, }
         fn element(s: SpanMut<i32>, i: u64) -> RefMut<i32>  { s:at_mut(i) }
         fn main() -> i32 | Err<_> {
             let values_owner = arc_ptr_alloc([i32(10), 20, 30])?; let values: RefMut<_> = values_owner:get().*; let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
-            let p: RefMut<i32> = { let borrowed = view(PtrMut<i32>(values_owner:get()), calls_owner:get()).values; borrowed:at_mut(u64(index(calls_owner:get()))) };
+            let p: RefMut<i32> = { let borrowed = view(values_owner:get():lea(0), calls_owner:get()).values; borrowed:at_mut(u64(index(calls_owner:get()))) };
             p = 42;
             let mut record = FieldsValues<_> { values = [3, 4] };
             record.values:at_mut(0) = 8;
-            let mut holder = view(PtrMut<i32>(values_owner:get()), calls_owner:get());
+            let mut holder = view(values_owner:get():lea(0), calls_owner:get());
             element(holder.values, 0) = 11;
             let mut temporary = { let borrowed = [7, 8]; borrowed:at(1) };
             if (calls == 3 && values:at(1) == 42 && values:at(0) == 11 && record.values:at(0) == 8 && temporary == 8) { 0 } else { 1 }
@@ -792,7 +792,7 @@ fn at_indexing_checks_bounds_before_later_effects() {
                 struct FieldsValues<T0> {{ values: T0, }}
 fn main() -> i32 | Err<_> {{
                     let values_owner = arc_ptr_alloc([1, 2])?; let values: RefMut<_> = values_owner:get().*;
-                    let mut holder = FieldsValues<_> {{ values = SpanMut<i32> {{ data = PtrMut<i32>(values_owner:get()), length = u64(2) }} }};
+                    let mut holder = FieldsValues<_> {{ values = SpanMut<i32> {{ data = values_owner:get():lea(0), length = u64(2) }} }};
                     {receiver}:at_mut({index}) = 9;
                     puts("after".data); 0
                 }}"#
@@ -809,7 +809,7 @@ fn array_and_span_indexing_fail_before_out_of_bounds_access() {
     for source in [
         "export { main }; fn main() -> i32  { let mut xs = [1, 2]; xs(-1) }",
         "export { main }; fn main() -> i32  { let mut xs = [1, 2]; xs:at_mut(2) = 9; 0 }",
-        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main() -> i32 | Err<_> { let xs_owner = arc_ptr_alloc([1, 2])?; let xs: Ref<_> = xs_owner:get().*; let mut s = SpanMut<i32> { data = PtrMut<i32>(xs_owner:get()), length = u64(2) }; s:at(u64(18446744073709551615)) }",
+        "export { main }; import { \"$/shared.resin\", \"$/span.resin\" }; fn main() -> i32 | Err<_> { let xs_owner = arc_ptr_alloc([1, 2])?; let xs: Ref<_> = xs_owner:get().*; let mut s = SpanMut<i32> { data = xs_owner:get():lea(0), length = u64(2) }; s:at(u64(18446744073709551615)) }",
         "export { main }; import { \"$/span.resin\" }; fn main() -> i32  { let mut s = SpanMut<i32> { data = PtrMut<i32>(u64(0)), length = u64(0) }; s:at(0) }",
     ] {
         let output = run_module(&module(source));

@@ -92,7 +92,7 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
             let mut number = value()?;
             let mut member = field()?;
             let mut values = slice()?;
-            let alias = values.data:clone();
+            let alias = values:clone();
             let mut tail = alias:slice(u64(1), u64(2));
             number:store(number:load() + i32(1));
             member:store(member:load() + i32(2));
@@ -736,7 +736,7 @@ fn gpu_sequences_allow_empty_tail_views_and_report_allocation_overflow() {
             let mut gpu = gpu_new()?;
             let mut values = gpu:alloc::<u32>(u64(3))?;
             let mut empty = values:slice(u64(3), u64(0));
-            let mut alias = empty.data:slice(u64(0), u64(0));
+            let mut alias = empty:slice(u64(0), u64(0));
             alias:copy_to(SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) });
             let mut zero = gpu:alloc::<u32>(u64(0))?;
             zero:copy_to(SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) });
@@ -763,7 +763,6 @@ fn gpu_sequences_reject_out_of_bounds_indices_and_overflowing_ranges() {
         "values:slice(u64(4), u64(0));",
         "values:slice(u64(2), u64(2));",
         "values:slice(u64(18446744073709551615), u64(2));",
-        "values.data:slice(u64(18446744073709551615), u64(1));",
     ] {
         let source = format!(
             r#"export {{ main }};

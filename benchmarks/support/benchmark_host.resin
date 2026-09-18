@@ -9,7 +9,7 @@ extern {
 	},
 };
 
-import { "$/shared.resin", "@WORKLOAD@" };
+import { "$/shared.resin", "$/span.resin", "@WORKLOAD@" };
 
 fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> (() | Err<_>) {
 	let mut count = u32(benchmark_argument(argc, argv, u32(1)));
@@ -19,16 +19,17 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> (() | Err<_>) {
 	let mut seed = u32(benchmark_argument(argc, argv, u32(5)));
 	let mut input_owner = arc_span_alloc::<u32>(u64(count), u32(0))?;
 	let mut output_owner = arc_span_alloc::<u32>(u64(count), u32(0))?;
-	let mut input = input_owner:get().data;
-	let mut output = output_owner:get().data;
-	benchmark_prepare(input, output, count, seed);
-	let root = arc_ptr_alloc(Root { count = count, iterations = iterations, input = input, output = output })?;
+	let input = input_owner:get();
+	let input_view = input:read_only();
+	let output = output_owner:get();
+	benchmark_prepare(input.data, output.data, count, seed);
+	let root = arc_ptr_alloc(Root { iterations = iterations, input = input_view, output = output })?;
 	let mut index: u64 = 0;
 	while (index < warmup) {
 		let mut start = benchmark_clock();
 		cpu(root:get());
 		let mut end = benchmark_clock();
-		benchmark_report(start, end, output, count, i32(0));
+		benchmark_report(start, end, output.data, count, i32(0));
 		index = index + u64(1);
 	};
 	index = u64(0);
@@ -36,7 +37,7 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> (() | Err<_>) {
 		let mut start = benchmark_clock();
 		cpu(root:get());
 		let mut end = benchmark_clock();
-		benchmark_report(start, end, output, count, i32(1));
+		benchmark_report(start, end, output.data, count, i32(1));
 		index = index + u64(1);
 	};
 	(())

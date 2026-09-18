@@ -4,6 +4,8 @@ GPU allocations have an owning handle and separate borrowed views. `gpu:create(v
 returns `GpuPtrMut<T>` for one value; `gpu:alloc::<T>(count)?` returns `GpuSpanMut<T>`
 for a sequence. Copies, indexed views, and slices retain the allocation and its GPU.
 Their `:read_only()` counterparts are `GpuPtr<T>` and `GpuSpan<T>`.
+A `GpuPtr` view denotes one element and cannot be sliced; keep the `GpuSpan`
+when further indexing or slicing is needed.
 
 Import `$/gpu.resin` for allocation and mapping, and `$/span.resin` for ordinary
 span operations. The GPU wrappers are source structs over the opaque `GpuView` owner.
@@ -66,6 +68,9 @@ drop hooks, booleans, and unions are not supported buffer elements. Choose `f32`
 explicitly for shared floating-point data; the default `f64` is not supported here.
 Shader pointer/integer casts and pointer reinterpretation remain unsupported;
 use typed fields and indexing.
+
+`gpu_enumerate_devices(infos)` similarly accepts a `SpanMut<ResinGpuDeviceInfo>`
+so device enumeration keeps its output capacity with its address.
 
 ## Memory modes
 

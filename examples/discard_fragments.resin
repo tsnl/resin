@@ -97,6 +97,6 @@ fn main() -> () | Err<_> {
 	let host = arc_span_alloc::<u8>(pixels.length, u8(0))?;
 	pixels:copy_to(host:get());
 	let view = host:get();
-	image_data_write_pixels("discard-fragments.png".data, 512, 512, 4, view:read_only(), 0)?;
+	image_data_write_pixels(bytes("discard-fragments.png"), 512, 512, 4, view:read_only(), 0)?;
 	(())
 }

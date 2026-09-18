@@ -101,10 +101,11 @@ quiet during measurement.
 ## Adding a workload
 
 1. Add a dedicated Resin module under `workloads/`, exporting `Root`, `kernel`, and
-   `cpu`. Preserve the common root layout: `count: u32`, `iterations: u32`,
-   `input: Ptr<u32>`, and `output: Ptr<u32>`. The decorated compute `kernel`
+   `cpu`. Preserve the common root layout: `iterations: u32`,
+   `input: Span<u32>`, and `output: SpanMut<u32>`. The decorated compute `kernel`
    takes `(index: u64, root: Ptr<Root>)`; `cpu` takes `Ptr<Root>` and invokes the
-   same kernel for each element. Check the index against `count` before access.
+   same kernel for each element. Use `output.length` as the work count and check it before access. The input span
+   covers the same number of elements.
 2. Add the name to the CLI allowlist and `WORKLOADS` in [suite/mod.rs](../benchmarks/suite/mod.rs), setting
    its default count and iteration count; implement its independent scalar reference
    in `expected()` there. Keep

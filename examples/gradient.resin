@@ -39,8 +39,8 @@ fn main() -> (() | Err<_>) {
 	let mut path = "gradient.png";
 	// Submission has finished. Borrow the coherent CPU mapping for PNG I/O.
 	let view = pixels:map()?;
-	let bytes = view:as_bytes();
-	image_data_write_pixels(path.data, width, height, 4, bytes:read_only(), 0)?;
+	let pixel_bytes = view:as_bytes();
+	image_data_write_pixels(bytes(path), width, height, 4, pixel_bytes:read_only(), 0)?;
 	print("wrote gradient.png\n");
 	(())
 }

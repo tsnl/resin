@@ -143,10 +143,11 @@ fn argument_integer(text: Ref<Span<u8>>) -> u32 | Err<String> {
 // Copy exactly the bounded view before calling C; embedded NULs/trailing bytes fail.
 fn argument_number(text: Ref<Span<u8>>) -> f32 | Err<_> {
 	let terminated = string_from_bytes(text);
-	let data = terminated:get().data;
+	let view = terminated:get();
+	let end_view = view:slice(view.length, 0);
 	let end = arc_ptr_alloc(Ptr<u8>(u64(0)))?;
-	let value = strtod(data, end:get());
-	if (text.length == u64(0) || u64(end:get().*) - u64(data) != text.length || !(value >= f64(-3.4e38) && value <= f64(3.4e38))) {
+	let value = strtod(view.data, end:get());
+	if (text.length == u64(0) || end:get().* != end_view.data || !(value >= f64(-3.4e38) && value <= f64(3.4e38))) {
 		return Err(fmt("Invalid finite number: {0}", (text:bytes(),)));
 	};
 	f32(value)

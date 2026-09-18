@@ -97,7 +97,7 @@ fn string_storage_is_terminated_without_changing_its_logical_length() {
                 fn strlen(text: Ptr<u8>) -> u64;
             },
         };
-        import { "$/string.resin", "$/stdio.resin" };
+        import { "$/string.resin", "$/stdio.resin", "$/span.resin" };
 
         struct FieldsText<T0> { text: T0, }
 fn main() -> i32  {
@@ -105,8 +105,9 @@ fn main() -> i32  {
             let mut empty = "";
             let mut copy = text;
             let mut record = FieldsText<_> { text = copy };
-            let mut pointer = record.text.data;
-            if (strlen(pointer) == u64(6) && Ptr<u8>(u64(pointer) + u64(6)).* == u8(0)
+            let pointer = record.text.data;
+            let storage = Span<u8> { data = pointer, length = text.length + 1 };
+            if (strlen(pointer) == u64(6) && storage:lea(text.length).* == u8(0)
                 && strlen(empty.data) == u64(0)) {
                 { let borrowed = fmt("{0}{1}", (text, empty)); print(borrowed) };
                 0
@@ -126,13 +127,14 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
                 fn strlen(text: Ptr<u8>) -> u64;
             },
         };
-        import { "$/string.resin", "$/stdio.resin" };
+        import { "$/string.resin", "$/stdio.resin", "$/span.resin" };
 
         fn main() -> i32  {
             let mut text = "a\0b\0";
-            let mut pointer = text.data;
-            if (strlen(pointer) == u64(1) && Ptr<u8>(u64(pointer) + u64(2)).* == u8(98)
-                && Ptr<u8>(u64(pointer) + u64(3)).* == u8(0) && Ptr<u8>(u64(pointer) + u64(4)).* == u8(0)) {
+            let pointer = text.data;
+            let storage = Span<u8> { data = pointer, length = text.length + 1 };
+            if (strlen(pointer) == u64(1) && storage:lea(2).* == u8(98)
+                && storage:lea(3).* == u8(0) && storage:lea(4).* == u8(0)) {
                 { let borrowed = fmt("before\0{0}after", (text,)); print(borrowed) };
                 0
             } else { 1 }
@@ -140,7 +142,7 @@ fn embedded_and_explicit_trailing_nuls_are_not_truncated() {
         b"before\0a\0b\0after",
     );
     prints(
-        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> { let buffer_owner = arc_ptr_alloc([u8(65), u8(0), u8(66), u8(0)])?; let buffer: Ref<_> = buffer_owner:get().*; { let borrowed_1 = fmt("{0}", ({ let borrowed = Span<u8> { data = Ptr<u8>(buffer_owner:get()), length = u64(4) }; borrowed:bytes() },)); print(borrowed_1) }; }"#,
+        r#"export { main }; import { "$/shared.resin", "$/string.resin", "$/stdio.resin", "$/span.resin" }; fn main() -> () | Err<_> { let buffer_owner = arc_ptr_alloc([u8(65), u8(0), u8(66), u8(0)])?; let buffer: Ref<_> = buffer_owner:get().*; { let borrowed_1 = fmt("{0}", ({ let borrowed = Span<u8> { data = buffer_owner:get():lea(0), length = u64(4) }; borrowed:bytes() },)); print(borrowed_1) }; }"#,
         b"A\0B\0",
     );
 }
@@ -382,7 +384,8 @@ fn from_bytes_copies_unterminated_spans_verbatim_and_owns_the_result() {
                 text = string_from_str("{0}} braces");
                 print(alias);
                 print(text);
-                let mut end = Ptr<u8>(u64(alias:get().data) + u64(3));
+                let storage = Span<u8> { data = alias:get().data, length = 4 };
+                let end = storage:lea(3);
                 if (alias:get().length != u64(3) || end.* != u8(0)) { print("bad terminator"); };
                 let mut empty = { let borrowed = Span<u8> { data = Ptr<u8>(u64(0)), length = u64(0) }; string_from_bytes(borrowed) };
                 if (empty:get().length != u64(0) || empty:get().data.* != u8(0)) { print("bad empty string"); };
@@ -453,7 +456,7 @@ fn literal_byte_views_preserve_storage_while_owned_strings_copy_it() {
             if (text.length == u64(4) && buffer.length == text.length &&
                 u64(buffer.data) == u64(text.data) && text:at(u64(1)) == u8(195) &&
                 u64(owned:get().data) != u64(text.data) && owned:get().length == u64(4) &&
-                Ptr<u8>(u64(owned:get().data) + u64(4)).* == u8(0) &&
+                { let storage = Span<u8> { data = owned:get().data, length = 5 }; storage:lea(4).* } == u8(0) &&
                 empty:get().length == u64(0) && empty:get().data.* == u8(0)) {
                 { let borrowed_1 = { let borrowed = view("{0}{1}{2}"); fmt(borrowed, (text, buffer:bytes(), owned:bytes())) }; print(borrowed_1) };
                 0

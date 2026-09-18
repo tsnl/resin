@@ -325,19 +325,18 @@ fn render(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, use_gpu: bool) ->
 	commands:submit()?;
 }
 
-// Four channels select RGBA; zero stride means tightly packed rows. The C-style
-// filename points to NUL-terminated bytes (a literal exposes these through .data).
-fn save_png(path: Ptr<u8>, width: u32, height: u32, pixels: SpanMut<u8>) -> () | Err<_> {
+// Four channels select RGBA; zero stride means tightly packed rows. Paths stay
+// bounded byte views through the image library boundary.
+fn save_png(path: Span<u8>, width: u32, height: u32, pixels: SpanMut<u8>) -> () | Err<_> {
 	image_data_write_pixels(path, width, height, 4, pixels:read_only(), 0)?;
-	let filename = c_string(path);
-	let message = fmt("Saved {0}\n", (filename:bytes(),));
+	let message = fmt("Saved {0}\n", (path:bytes(),));
 	print(message);
 }
 
 // Read the displayed image in one transfer, including the currently selected view.
 // Copy the presentation image into a GPU readback buffer, wait, then copy into
 // host-owned bytes for PNG I/O. Keep the host owner alive while saving its span.
-fn screenshot(renderer: Ref<Renderer>, path: Ptr<u8>) -> () | Err<_> {
+fn screenshot(renderer: Ref<Renderer>, path: Span<u8>) -> () | Err<_> {
 	let image_width = renderer.image:width();
 	let image_height = renderer.image:height();
 	let count = u64(image_width) * u64(image_height) * 4;
@@ -431,7 +430,7 @@ fn input(window: Ref<Window>, plot: RefMut<Plot>, solver: RefMut<Mandelbrot>) ->
 	changed
 }
 
-fn headless(options: Ref<Options>, plot: Plot, solver: Mandelbrot, path: Ptr<u8>) -> () | Err<_> {
+fn headless(options: Ref<Options>, plot: Plot, solver: Mandelbrot, path: Span<u8>) -> () | Err<_> {
 	// --output avoids the window. The CPU branch also avoids GPU creation entirely.
 	if (options.use_gpu) {
 		let renderer = renderer_new(gpu_new()?, plot.width, plot.height)?;
@@ -532,7 +531,7 @@ fn main(argc: i32, argv: Ptr<Ptr<u8>>, envp: Ptr<Ptr<u8>>) -> i32 | Err<_> {
 	let solver = mandelbrot_new(options.iterations);
 	match (options.output) {
 		// A path requests headless output; None opens the interactive explorer.
-		Ptr<u8>(path) => {
+		Span<u8>(path) => {
 			headless(options, plot, solver, path)?;
 		},
 		None => {
@@ -556,9 +555,9 @@ struct Options {
 	real: f32,
 	imag: f32,
 	span: f32,
-	// Paths borrow the immutable, NUL-terminated process argument snapshot.
-	output: Ptr<u8> | None,
-	screenshot: Ptr<u8>,
+	// Paths preserve their length while borrowing the process argument snapshot.
+	output: Span<u8> | None,
+	screenshot: Span<u8>,
 	help: bool,
 }
 
@@ -574,7 +573,7 @@ fn parse_options(args: Ref<Span<Ptr<u8>>>) -> Options | Err<_> {
 		imag = f32(0.0),
 		span = f32(3.0),
 		output = None,
-		screenshot = "mandelbrot.png".data,
+		screenshot = bytes("mandelbrot.png"),
 		help = false,
 	};
 	// A | separates aliases; trailing = means the option takes a value.
@@ -620,9 +619,9 @@ fn parse_options(args: Ref<Span<Ptr<u8>>>) -> Options | Err<_> {
 				return Err(fmt("Empty path for {0}", (item.name:bytes(),)));
 			};
 			if (item:named("--output")) {
-				options.output = value.data;
+				options.output = value;
 			} else {
-				options.screenshot = value.data;
+				options.screenshot = value;
 			};
 		};
 	};

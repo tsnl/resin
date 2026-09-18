@@ -141,7 +141,7 @@ The standard library's `runtime_status_from_code(code)` converts native status i
 `(() | Err<RuntimeError>)`. `RuntimeError` is a union of named errors such as
 `InvalidArgument`, `OutOfMemory`, and `IoError`; `UnknownRuntimeError { code }`
 preserves unrecognized codes. `runtime_status_code(error)` and `runtime_status_message(error)`
-recover the native code and C diagnostic string. Standard-library operations already
+recover the native code and a borrowed `Span<u8>` containing its diagnostic text. Standard-library operations already
 return error unions, so callers normally use `gpu_new()?` rather than converting statuses.
 Standard-library resources release themselves on scope exit, including early returns
 through `?`. Value copies and explicit clones retain shared ownership.

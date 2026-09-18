@@ -486,7 +486,7 @@ fn native_statuses_become_named_errors_and_keep_unknown_codes() {
                 code = code + 1;
             };
             let mut message = "io error";
-            valid = valid && strcmp(runtime_status_message(IoError {}), message.data) == 0;
+            valid = valid && strcmp(runtime_status_message(IoError {}).data, message.data) == 0;
             (if (valid) { 0 } else { 1 })
         }"#,
         "",
@@ -525,23 +525,23 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         fn main() -> (i32 | Err<_>)  {
             let mut path = "pixel.png";
             let buffer_owner = arc_ptr_alloc([u8(1), u8(2), u8(3), u8(255)])?; let buffer: Ref<_> = buffer_owner:get().*;
-            { let borrowed = Span<u8> { data = buffer_owner:get():lea(0), length = u64(4) }; image_data_write_pixels(path.data, 1, 1, 4, borrowed, 0) }?;
-            let mut image = image_data_read_png(path.data, 0)?;
+            { let borrowed = Span<u8> { data = buffer_owner:get():lea(0), length = u64(4) }; image_data_write_pixels(bytes(path), 1, 1, 4, borrowed, 0) }?;
+            let mut image = image_data_read_png(bytes(path), 0)?;
             let alias = image:clone();
             let mut copy_path = "copy.png";
-            alias:write_png(copy_path.data)?;
-            let mut copied = image_data_read_png(copy_path.data, 0)?;
+            alias:write_png(bytes(copy_path))?;
+            let mut copied = image_data_read_png(bytes(copy_path), 0)?;
             (if (copied:width() == image:width() && copied:height() == image:height() && copied:pixels().data.* == image:pixels().data.*
                 && image:width() == u32(1) && image:height() == u32(1) && image:channels() == u32(4)
-                && image:pixels().data.* == u8(1) && Ptr<u8>(u64(image:pixels().data) + u64(3)).* == u8(255)) { 0 } else { 1 })
+                && image:pixels().data.* == u8(1) && { let pixel_view = image:pixels(); pixel_view:at(3) } == u8(255)) { 0 } else { 1 })
         }
         "#,
         "",
     );
     success(&output);
     for call in [
-        "image_data_read_png(path.data, 4)?",
-        "let view = SpanMut<u8> { data = buffer:get():lea(0), length = u64(4) }; image_data_write_pixels(path.data, 1, 1, 4, view:read_only(), 0)?",
+        "image_data_read_png(bytes(path), 4)?",
+        "let view = SpanMut<u8> { data = buffer:get():lea(0), length = u64(4) }; image_data_write_pixels(bytes(path), 1, 1, 4, view:read_only(), 0)?",
     ] {
         let output = run(
             &format!(
@@ -553,6 +553,35 @@ fn png_wrappers_return_image_data_and_propagate_io_errors() {
         assert_eq!(output.stdout, b"cleanup\n");
         assert!(String::from_utf8_lossy(&output.stderr).contains("unhandled error: IoError"));
     }
+}
+
+#[test]
+fn image_paths_preserve_slice_lengths_and_reject_embedded_nuls() {
+    let output = run(
+        r#"export { main };
+        import { "$/shared.resin", "$/image.resin", "$/span.resin", "$/status.resin" };
+        fn main() -> i32 | Err<_> {
+            let storage = arc_span_alloc(4, u8(255))?;
+            let view = storage:get();
+            let name = bytes("sliced.png.not-part-of-the-path");
+            let path = name:slice(0, 10);
+            image_data_write_pixels(path, 1, 1, 4, view:read_only(), 0)?;
+            let image = image_data_read_png(bytes("sliced.png"), 4)?;
+            assert(image:width() == 1 && image:height() == 1);
+            image:write_png(path)?;
+            match (image_data_read_png(bytes("sliced.png\0ignored"), 4)) {
+                Err(error) => { assert(runtime_status_code(error) == 1); },
+                ImageData(_) => { assert(false); },
+            };
+            match (image:write_png(bytes("sliced.png\0ignored"))) {
+                Err(error) => { assert(runtime_status_code(error) == 1); },
+                ()(_) => { assert(false); },
+            };
+            0
+        }"#,
+        "",
+    );
+    success(&output);
 }
 
 #[test]
@@ -573,8 +602,8 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
                 import {{ "$/shared.resin", "$/image.resin", "$/span.resin", "$/status.resin" }};
                 fn main() -> i32 | Err<_> {{
                     let buffer_owner = arc_ptr_alloc([u8(0), u8(0), u8(0), u8(0), u8(0), u8(0), u8(0), u8(0)])?; let buffer: Ref<_> = buffer_owner:get().*;
-                    let mut bytes = SpanMut<u8> {{ data = buffer_owner:get():lea(0), length = {length} }};
-                    match (image_data_write_pixels("missing/pixel.png".data, {width}, {height}, {channels}, bytes:read_only(), {stride})) {{
+                    let pixel_bytes = SpanMut<u8> {{ data = buffer_owner:get():lea(0), length = {length} }};
+                    match (image_data_write_pixels(bytes("missing/pixel.png"), {width}, {height}, {channels}, pixel_bytes:read_only(), {stride})) {{
                         ()(value) => {{ 1 }},
                         Err(error) => {{ if (runtime_status_code(error) == 1) {{ 0 }} else {{ 1 }} }},
                     }}
@@ -591,12 +620,12 @@ fn png_pixel_views_check_dimensions_padding_and_storage_before_native_access() {
         import { "$/shared.resin", "$/image.resin", "$/span.resin" };
         fn main() -> (i32 | Err<_>)  {
             let buffer_owner = arc_ptr_alloc([u8(1), u8(2), u8(3), u8(255), u8(99), u8(4), u8(5), u8(6), u8(255)])?; let buffer: Ref<_> = buffer_owner:get().*;
-            let mut bytes = SpanMut<u8> { data = buffer_owner:get():lea(0), length = u64(9) };
-            image_data_write_pixels("padded.png".data, 1, 2, 4, bytes:read_only(), 5)?;
-            let mut image = image_data_read_png("padded.png".data, 0)?;
+            let pixel_bytes = SpanMut<u8> { data = buffer_owner:get():lea(0), length = u64(9) };
+            image_data_write_pixels(bytes("padded.png"), 1, 2, 4, pixel_bytes:read_only(), 5)?;
+            let mut image = image_data_read_png(bytes("padded.png"), 0)?;
             let mut loaded = image:pixels();
-            { let borrowed = bytes:slice(0, 4); image_data_write_pixels("single.png".data, 1, 1, 4, borrowed:read_only(), u64(0xffffffffffffffff)) }?;
-            let mut single = image_data_read_png("single.png".data, 0)?;
+            { let borrowed = pixel_bytes:slice(0, 4); image_data_write_pixels(bytes("single.png"), 1, 1, 4, borrowed:read_only(), u64(0xffffffffffffffff)) }?;
+            let mut single = image_data_read_png(bytes("single.png"), 0)?;
             (if (loaded:at(0) == u8(1) && loaded:at(4) == u8(4)
                 && single:height() == u32(1) && { let borrowed = single:pixels(); borrowed:at(3) } == u8(255)) { 0 } else { 1 })
         }
@@ -771,7 +800,7 @@ fn presentation_distinguishes_skipped_frames_from_errors_without_opening_windows
 fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
     let output = run(
         r#"export { main };
-        import { "$/gpu.resin", "$/window.resin", "$/status.resin", "$/string.resin" };
+        import { "$/gpu.resin", "$/window.resin", "$/status.resin", "$/string.resin", "$/span.resin" };
         fn valid_size(width: u32, height: u32) -> bool  {
             width == u32(640) && height == u32(480)
         }
@@ -779,7 +808,7 @@ fn queries_return_values_and_enumeration_preserves_incomplete_errors() {
             let mut window = { let borrowed = string_from_str("queries"); window_new(u32(1), u32(1), borrowed) }?;
             let mut count = gpu_device_count()?;
             let mut size = window:framebuffer_size()?;
-            let mut incomplete = match (gpu_enumerate_devices(PtrMut<ResinGpuDeviceInfo>(u64(0)), 0)) {
+            let mut incomplete = match (gpu_enumerate_devices(SpanMut<ResinGpuDeviceInfo> { data = PtrMut<ResinGpuDeviceInfo>(u64(0)), length = 0 })) {
                 ()(value) => { 0 },
                 Err(error) => { runtime_status_code(error) },
             };
