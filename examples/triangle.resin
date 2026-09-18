@@ -78,7 +78,7 @@ fn main() -> (() | Err<_>) {
 	let mut host = arc_span_alloc::<u8>(pixels.length, u8(0))?;
 	pixels:copy_to(host:get());
 	let view = host:get();
-	image_data_write_pixels(path.data, 256, 256, 4, view, 0)?;
+	image_data_write_pixels(path.data, 256, 256, 4, view:read_only(), 0)?;
 	print("wrote triangle.png\n");
 	(())
 }

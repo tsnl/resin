@@ -63,7 +63,8 @@ impl Decoder<'_> {
                     .map(|arg| self.ty(arg, infer))
                     .collect::<Result<Vec<_>, _>>()?;
                 let builtin = match head.val.as_ref() {
-                    "Ptr" => Some(Head::Pointer),
+                    "Ptr" => Some(Head::Pointer { mutable: false }),
+                    "PtrMut" => Some(Head::Pointer { mutable: true }),
                     "Ref" => Some(Head::Reference { mutable: false }),
                     "RefMut" => Some(Head::Reference { mutable: true }),
                     "Err" => Some(Head::Error),

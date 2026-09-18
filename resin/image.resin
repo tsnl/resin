@@ -5,8 +5,8 @@ export { ImageData, width, height, channels, pixels, image_data_read_png, image_
 extern {
 	"resin_runtime.h": {
 		fn resin_image_write_png(path: Ptr<u8>, width: u32, height: u32, channels: u32, pixels: Ptr<u8>, stride: u64) -> i32;
-		fn resin_image_read_png(path: Ptr<u8>, channels: u32, width: Ptr<u32>, height: Ptr<u32>, actual_channels: Ptr<u32>, pixels: Ptr<Ptr<u8>>) -> i32;
-		fn resin_image_free(pixels: Ptr<u8>) -> ();
+		fn resin_image_read_png(path: Ptr<u8>, channels: u32, width: PtrMut<u32>, height: PtrMut<u32>, actual_channels: PtrMut<u32>, pixels: PtrMut<PtrMut<u8>>) -> i32;
+		fn resin_image_free(pixels: PtrMut<u8>) -> ();
 	},
 };
 
@@ -16,7 +16,7 @@ struct ImageDataOwner {
 	width: u32,
 	height: u32,
 	channels: u32,
-	pixels: Ptr<u8>,
+	pixels: PtrMut<u8>,
 }
 fn drop(self: RefMut<ImageDataOwner>) {
 	if (u64(self.pixels) != u64(0)) {
@@ -39,9 +39,9 @@ fn channels(self: Ref<ImageData>) -> u32 {
 	self.owner:get().channels
 }
 
-fn pixels(self: Ref<ImageData>) -> Span<u8> {
+fn pixels(self: Ref<ImageData>) -> SpanMut<u8> {
 	let mut data = self.owner:get();
-	Span<u8> { data = data.pixels, length = u64(data.width) * u64(data.height) * u64(data.channels) }
+	SpanMut<u8> { data = data.pixels, length = u64(data.width) * u64(data.height) * u64(data.channels) }
 }
 
 fn image_data_read_png(path: Ptr<u8>, channels: u32) -> (ImageData | Err<RuntimeError>) {
@@ -50,7 +50,7 @@ fn image_data_read_png(path: Ptr<u8>, channels: u32) -> (ImageData | Err<Runtime
 			width = u32(0),
 			height = u32(0),
 			channels = u32(0),
-			pixels = Ptr<u8>(u64(0)),
+			pixels = PtrMut<u8>(u64(0)),
 		}
 	)?;
 	let mut data = owner:get();
@@ -58,7 +58,7 @@ fn image_data_read_png(path: Ptr<u8>, channels: u32) -> (ImageData | Err<Runtime
 	(ImageData { owner = owner })
 }
 
-fn image_data_write_pixels(path: Ptr<u8>, width: u32, height: u32, channels: u32, pixels: Ref<Span<u8>>, stride: u64) -> (() | Err<RuntimeError>) {
+fn image_data_write_pixels(path: Ptr<u8>, width: u32, height: u32, channels: u32, pixels: Span<u8>, stride: u64) -> (() | Err<RuntimeError>) {
 	if (width == u32(0) || height == u32(0) || channels == u32(0) || channels > u32(4)) {
 		return Err(InvalidArgument {});
 	};

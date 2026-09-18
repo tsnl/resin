@@ -80,7 +80,7 @@ fn value(types: &Types<'_>, ty: &Ty, expr: String) -> Result<String, Error> {
             "unsigned_value",
             format!("(uint64_t)(uintptr_t)({expr})"),
         ),
-        ty if *ty == Ty::Str || *ty == Ty::byte_span() => {
+        ty if *ty == Ty::Str || *ty == Ty::byte_span(false) => {
             let (data, length) = bytes(ty, &expr)?;
             (
                 "BYTES",

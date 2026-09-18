@@ -76,8 +76,8 @@ fn direction(camera: Fisheye, x: f32, y: f32) -> (f32, f32, f32) {
 // Share parameters and a color payload between stages
 //
 
-// The host uses Parameters<GpuSpan<u8>> to retain the output allocation.
-// Recording projects that handle to Parameters<Span<u8>> for shader access.
+// The host uses Parameters<GpuSpanMut<u8>> to retain the output allocation.
+// Recording projects that handle to Parameters<SpanMut<u8>> for shader access.
 // All three stages agree on this root type. The dimensions let generation
 // recover pixel coordinates from its flattened invocation index.
 struct Parameters<Pixels> {
@@ -106,7 +106,7 @@ fn channel(value: f32) -> u8 {
 	u8(value * 255)
 }
 // Four tightly packed bytes per pixel: red, green, blue, opaque alpha.
-fn write_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
+fn write_pixel(pixels: Ref<SpanMut<u8>>, index: u64, color: Color) {
 	pixels:at_mut(index * 4) = channel(color.r);
 	pixels:at_mut(index * 4 + 1) = channel(color.g);
 	pixels:at_mut(index * 4 + 2) = channel(color.b);
@@ -120,7 +120,7 @@ fn write_pixel(pixels: Ref<Span<u8>>, index: u64, color: Color) {
 // A width x height x 1 launch supplies exactly one invocation per pixel.
 // Sample pixel centers, center the image, and flip screen Y to camera Y.
 @ray_generation_shader
-fn generation(index: u64, root: Ptr<Parameters<Span<u8>>>) {
+fn generation(index: u64, root: PtrMut<Parameters<SpanMut<u8>>>) {
 	let x = f32(index % u64(root.width)) + 0.5 - f32(root.width) * 0.5;
 	let y = f32(root.height) * 0.5 - (f32(index / u64(root.width)) + 0.5);
 	let ray = direction(root.camera, x, y);
@@ -135,7 +135,7 @@ fn generation(index: u64, root: Ptr<Parameters<Span<u8>>>) {
 // A ray without an intersection gets a dark blue background. We replace the
 // initial payload entirely, so these two stage parameters are unused here.
 @miss_shader
-fn miss(initial: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
+fn miss(initial: Color, root: PtrMut<Parameters<SpanMut<u8>>>) -> Color {
 	Color { r = 0.04, g = 0.06, b = 0.1 }
 }
 
@@ -144,7 +144,7 @@ fn miss(initial: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
 // weights to RGB interpolates vertex colors without normals or a lighting model.
 // trace_ray is available in generation and its helpers, not in these hit stages.
 @closest_hit_shader
-fn closest(initial: Color, root: Ptr<Parameters<Span<u8>>>) -> Color {
+fn closest(initial: Color, root: PtrMut<Parameters<SpanMut<u8>>>) -> Color {
 	let hit = ray_hit_info();
 	Color { r = 1 - hit.3 - hit.4, g = hit.3, b = hit.4 }
 }
@@ -162,7 +162,7 @@ fn triangle_scene(gpu: Ref<Gpu>) -> GpuRayScene | Err<_> {
 	let transforms = arc_ptr_alloc([f32(1), 0, 0, -3, 0, 1, 0, 0, 0, 0, 1, 2, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 2, 1, 0, 0, 3, 0, 1, 0, 0, 0, 0, 1, 2])?;
 	// Creation copies both spans, builds the mesh and instance acceleration
 	// structures, and waits. The input owners can safely leave scope afterward.
-	gpu:create_ray_scene(Span<f32> { data = vertices:get():lea(0), length = 9 }, Span<f32> { data = transforms:get():lea(0), length = 36 })
+	gpu:create_ray_scene(SpanMut<f32> { data = vertices:get():lea(0), length = 9 }, SpanMut<f32> { data = transforms:get():lea(0), length = 36 })
 }
 
 //
@@ -188,19 +188,19 @@ fn main() -> i32 | Err<_> {
 	let count = u64(width) * u64(height) * 4;
 	let pixels = gpu:alloc::<u8>(count)?;
 	// Keep an owning pixel handle for readback as well as the launch's parameters.
-	let root = Parameters<GpuSpan<u8>> { width = width, height = height, camera = example_camera(), pixels = pixels:clone() };
+	let root = Parameters<GpuSpanMut<u8>> { width = width, height = height, camera = example_camera(), pixels = pixels:clone() };
 	let commands = gpu:start_command_recording()?;
 	// Dimensions count rays, not compute workgroups. Recording retains the
 	// pipeline and projected allocations; submit waits for GPU completion.
 	commands:trace_rays(pipeline, root, width, height, 1)?;
 	commands:submit()?;
 
-	// Copy finished pixels into host memory for PNG I/O. The borrowed Span stays
+	// Copy finished pixels into host memory for PNG I/O. The borrowed SpanMut stays
 	// valid while host is alive. Four channels and zero stride mean packed RGBA.
 	let host = arc_span_alloc(count, u8(0))?;
 	pixels:copy_to(host:get());
 	let bytes = host:get();
-	image_data_write_pixels("ray-tracing.png".data, width, height, 4, bytes, 0)?;
+	image_data_write_pixels("ray-tracing.png".data, width, height, 4, bytes:read_only(), 0)?;
 	print("wrote ray-tracing.png\n");
 	0
 }

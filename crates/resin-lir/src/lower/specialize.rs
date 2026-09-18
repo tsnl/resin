@@ -570,7 +570,7 @@ impl Specialization<'_, '_> {
     }
 
     fn require_assignable(&self, from: &Ty, to: &Ty) -> Result<(), Error> {
-        if from == to || from.widens_to(to) {
+        if from == to || from.read_only().as_ref() == Some(to) || from.widens_to(to) {
             return Ok(());
         }
         self.instances
@@ -688,8 +688,7 @@ impl Specialization<'_, '_> {
         let from = self.ty(&source.ty)?;
         let conversion = if &from == to {
             ReceiverConversion::Value
-        } else if matches!((&from, to), (Ty::Reference { mutable: true, referent: a }, Ty::Reference { mutable: false, referent: b }) if a == b)
-        {
+        } else if from.read_only().as_ref() == Some(to) {
             ReceiverConversion::ReadOnly
         } else if matches!(to, Ty::Reference { referent, .. } if **referent == from) {
             ReceiverConversion::Borrow
@@ -1068,7 +1067,7 @@ impl Specialization<'_, '_> {
                 .map_err(|error| self.typing_error(error))?;
         }
         if op == Intrinsic::PointerBytes
-            && !matches!(args.params.first(), Some(Ty::Pointer { pointee }) if pointee.is_numeric())
+            && !matches!(args.params.first(), Some(Ty::Pointer { pointee, .. }) if pointee.is_numeric())
         {
             return Err(self.instance_error("byte views require numeric elements"));
         }
@@ -1332,7 +1331,10 @@ fn mutable_place(term: &concrete::Term) -> bool {
     }
     match &term.kind {
         concrete::TermKind::Local { mutable, .. } => *mutable,
-        concrete::TermKind::Deref { pointer } => mutable_access(&pointer.ty).unwrap_or(false),
+        concrete::TermKind::Deref { pointer } => matches!(
+            &pointer.ty,
+            Ty::Pointer { mutable: true, .. } | Ty::Reference { mutable: true, .. }
+        ),
         concrete::TermKind::Field { base, .. } => {
             mutable_access(&base.ty).unwrap_or_else(|| mutable_place(base))
         }
@@ -1342,7 +1344,7 @@ fn mutable_place(term: &concrete::Term) -> bool {
 
 fn mutable_access(ty: &Ty) -> Option<bool> {
     match ty {
-        Ty::Pointer { pointee } => Some(mutable_access(pointee).unwrap_or(true)),
+        Ty::Pointer { pointee, mutable } => Some(mutable_access(pointee).unwrap_or(*mutable)),
         Ty::Reference { referent, mutable } => Some(mutable_access(referent).unwrap_or(*mutable)),
         _ => None,
     }

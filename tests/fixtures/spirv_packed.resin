@@ -19,11 +19,11 @@ struct Sample {
 }
 struct Root {
 	count: u64,
-	inputs: Ptr<Sample>,
-	outputs: Ptr<Sample>,
+	inputs: PtrMut<Sample>,
+	outputs: PtrMut<Sample>,
 }
 
-fn update(output: Ptr<Sample>, index: u64) {
+fn update(output: PtrMut<Sample>, index: u64) {
 	let mut row = if ((index & u64(1)) == u64(0)) {
 		&output.rows.first
 	} else {
@@ -44,10 +44,10 @@ fn update(output: Ptr<Sample>, index: u64) {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(index: u64, root: PtrMut<Root>) {
 	if (index < root.count) {
-		let mut inputs = Span<Sample> { data = root.inputs, length = root.count };
-		let mut outputs = Span<Sample> { data = root.outputs, length = root.count };
+		let mut inputs = SpanMut<Sample> { data = root.inputs, length = root.count };
+		let mut outputs = SpanMut<Sample> { data = root.outputs, length = root.count };
 		let output = outputs:lea(index);
 		let input: Ref<Sample> = fixture_index(inputs.data, inputs.length, index).*;
 		output.* = Sample { lead = input.lead, rows = Rows { first = copy_bytes(input.rows.first), second = copy_bytes(input.rows.second) }, marker = input.marker, wide = input.wide, tail = input.tail };
@@ -58,4 +58,4 @@ fn kernel(index: u64, root: Ptr<Root>) {
 fn copy_bytes(value: Ref<Bytes3>) -> Bytes3 {
 	Bytes3 { a = value.a, b = value.b, c = value.c }
 }
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_index_mut" fn fixture_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;

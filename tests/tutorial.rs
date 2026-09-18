@@ -55,9 +55,9 @@ fn tutorial_reference_rejections_remain_language_errors() {
         let error = support::pipeline::source_module(source).unwrap_err();
         assert!(
             error.to_string().contains("cannot take the address")
-                || error
-                    .to_string()
-                    .contains("TypeMismatch { expected: Pointer { pointee: Int32 }"),
+                || error.to_string().contains(
+                    "TypeMismatch { expected: Pointer { mutable: false, pointee: Int32 }"
+                ),
             "{error}"
         );
         count += 1;

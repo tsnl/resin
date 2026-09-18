@@ -160,7 +160,7 @@ fn structs_copy_by_stored_fields_including_generic_and_unused_arguments() {
         "struct Cell<T> { value: T } fn f(value: Cell<Cell<i32>>) { let copied = value; value; }",
     );
     accepts(
-        "struct Item {} fn drop(value: RefMut<Item>) {} struct View<T> { data: Ptr<T> } fn f(value: View<Item>) { let copied = value; value; }",
+        "struct Item {} fn drop(value: RefMut<Item>) {} struct View<T> { data: PtrMut<T> } fn f(value: View<Item>) { let copied = value; value; }",
     );
     accepts("struct Token<T> {} fn f<T>(value: Token<T>) { let copied = value; value; }");
     rejects(

@@ -120,7 +120,7 @@ fn sizeof_accepts_only_types_and_preserves_generic_queries() {
     accepts(
         "struct Pair<T> { first: T, second: T, } const bytes = sizeof(Pair<i32>); fn size<T>() -> u64  { sizeof(T) } fn main() -> u64  { bytes + size::<i32>() }",
     );
-    accepts("struct Node { next: Ptr<Node>, value: i32, } const bytes = sizeof(Node);");
+    accepts("struct Node { next: PtrMut<Node>, value: i32, } const bytes = sizeof(Node);");
     accepts(
         "struct FieldsXY<T0, T1> { x: T0, y: T1, }\ntype Number = i32; const bytes = sizeof(Number); fn value() -> u64  { sizeof(FieldsXY<i32, i64>) }",
     );

@@ -222,7 +222,7 @@ fn check_text_views(module: &Module) -> Result<(), VerifyError> {
             || function.profile != crate::Profile::Host
             || function.parameter_count != 1
             || function.locals.first().map(|local| &local.ty) != Some(&receiver)
-            || function.result != Ty::byte_span()
+            || function.result != Ty::byte_span(false)
         {
             return Err(error());
         }

@@ -301,7 +301,7 @@ impl Substitution {
                 let compatible = if lookup.literal_arguments.contains(&index) {
                     numeric_literal_matches(&source, &target)
                 } else {
-                    source.widens_to(&target)
+                    source.widens_to(&target) || source.read_only().as_ref() == Some(&target)
                 };
                 if !compatible {
                     return Ok(None);
@@ -577,7 +577,8 @@ impl Substitution {
                     value => value,
                 }
             }
-            resin_hir::Type::Pointer { pointee } => resin_hir::Type::Pointer {
+            resin_hir::Type::Pointer { pointee, mutable } => resin_hir::Type::Pointer {
+                mutable: *mutable,
                 pointee: Box::new(self.normalize_at(pointee, depth + 1, state, instances)?),
             },
             resin_hir::Type::StrongOwner => resin_hir::Type::StrongOwner,
@@ -670,7 +671,8 @@ fn materialize(
             mutable: *mutable,
             referent: Box::new(materialize(referent, instances)?),
         },
-        resin_hir::Type::Pointer { pointee } => Ty::Pointer {
+        resin_hir::Type::Pointer { pointee, mutable } => Ty::Pointer {
+            mutable: *mutable,
             pointee: Box::new(materialize(pointee, instances)?),
         },
         resin_hir::Type::StrongOwner => Ty::StrongOwner,
@@ -736,7 +738,8 @@ fn expression(source: &Ty, instances: &super::instances::Instances<'_>) -> resin
             mutable: *mutable,
             referent: Box::new(expression(referent, instances)),
         },
-        Ty::Pointer { pointee } => resin_hir::Type::Pointer {
+        Ty::Pointer { pointee, mutable } => resin_hir::Type::Pointer {
+            mutable: *mutable,
             pointee: Box::new(expression(pointee, instances)),
         },
         Ty::StrongOwner => resin_hir::Type::StrongOwner,
@@ -826,7 +829,7 @@ fn check_size(
         resin_hir::Type::Reference {
             referent: pointee, ..
         }
-        | resin_hir::Type::Pointer { pointee } => check_size(pointee, depth + 1, remaining)?,
+        | resin_hir::Type::Pointer { pointee, .. } => check_size(pointee, depth + 1, remaining)?,
         resin_hir::Type::Function { params, result } => {
             for param in params {
                 check_size(param, depth + 1, remaining)?;
@@ -958,8 +961,8 @@ fn match_parameter(
         } => {
             matches!(value, Type::Defined { definition: actual, arguments: values } if actual == definition && params.len() == values.len() && params.iter().zip(values).all(|(p,v)| match_parameter(p,v,arguments,depth+1)))
         }
-        Type::Pointer { pointee } => {
-            matches!(value, Type::Pointer { pointee: actual } if match_parameter(pointee, actual, arguments, depth+1))
+        Type::Pointer { pointee, mutable } => {
+            matches!(value, Type::Pointer { pointee: actual, mutable: access } if (mutable == access || (depth == 0 && !mutable)) && match_parameter(pointee, actual, arguments, depth+1))
         }
         Type::Array { element, length } => {
             matches!(value, Type::Array { element: actual, length: count } if length == count && match_parameter(element, actual, arguments, depth+1))
@@ -988,7 +991,13 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
     use resin_hir::Type;
     let first = value_type(arguments.first()?);
     let (op, params, result) = match (name, first) {
-        ("replace", Type::Pointer { pointee }) => (
+        (
+            "replace",
+            Type::Pointer {
+                pointee,
+                mutable: true,
+            },
+        ) => (
             Intrinsic::Replace,
             vec![first.clone(), *pointee.clone()],
             *pointee.clone(),
@@ -1007,8 +1016,8 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
                 referent: element.clone(),
             },
         ),
-        ("at" | "at_mut" | "lea", Type::Pointer { pointee })
-            if matches!(pointee.as_ref(), Type::Array { .. }) =>
+        ("at" | "at_mut" | "lea", Type::Pointer { pointee, mutable })
+            if (*mutable || name != "at_mut") && matches!(pointee.as_ref(), Type::Array { .. }) =>
         {
             let Type::Array { element, .. } = pointee.as_ref() else {
                 unreachable!()
@@ -1018,6 +1027,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
                 vec![first.clone(), Type::UInt64],
                 if name == "lea" {
                     Type::Pointer {
+                        mutable: *mutable,
                         pointee: element.clone(),
                     }
                 } else {
@@ -1033,6 +1043,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
             vec![Type::Str, Type::UInt64],
             if name == "lea" {
                 Type::Pointer {
+                    mutable: false,
                     pointee: Box::new(Type::UInt8),
                 }
             } else {
@@ -1047,6 +1058,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
             vec![
                 Type::GpuArguments,
                 Type::Pointer {
+                    mutable: true,
                     pointee: Box::new(Type::UInt8),
                 },
                 Type::UInt32,
@@ -1060,6 +1072,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
             vec![
                 Type::GpuArguments,
                 Type::Pointer {
+                    mutable: true,
                     pointee: Box::new(Type::UInt8),
                 },
                 Type::UInt32,
@@ -1073,6 +1086,7 @@ fn primitive_operation(name: &str, arguments: &[resin_hir::Type]) -> Option<Reso
             vec![
                 Type::GpuArguments,
                 Type::Pointer {
+                    mutable: true,
                     pointee: Box::new(Type::UInt8),
                 },
                 Type::UInt32,

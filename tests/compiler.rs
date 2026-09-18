@@ -52,7 +52,7 @@ fn compilation_uses_supplied_source_versions_and_explicit_profiles() {
         ),
         (CProfile::Release, None, 43, "release"),
     ] {
-        let source = loader.source_from_text(&path, format!("export {{ main }};\nimport {{ \"$/shared.resin\" }};\n @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  {{ let mut i = u32(invocation); output.* = i; }} fn main() -> i32 | Err<_> {{ let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; kernel({code}, output_owner:get()); if (output == {code}) {{ {code} }} else {{ 0 }} }}")).unwrap();
+        let source = loader.source_from_text(&path, format!("export {{ main }};\nimport {{ \"$/shared.resin\" }};\n @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  {{ let mut i = u32(invocation); output.* = i; }} fn main() -> i32 | Err<_> {{ let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; kernel({code}, output_owner:get()); if (output == {code}) {{ {code} }} else {{ 0 }} }}")).unwrap();
         let compilation =
             support::frontend::analyze(source.clone(), &mut loader, previous.as_ref());
         let artifact = build(&compilation, &environment, profile);

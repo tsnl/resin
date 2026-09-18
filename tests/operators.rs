@@ -100,7 +100,7 @@ fn __add__(a: Number, b: Number) -> Number  { Number { value = a.value + b.value
 
 fn __sub__(a: Ref<Number>, b: i32) -> i32  { a.value - b }
 
-        fn next(state: Ptr<i32>, digit: i32) -> Number  {
+        fn next(state: PtrMut<i32>, digit: i32) -> Number  {
             state.* = state.* * 10 + digit;
             Number { value = digit }
         }
@@ -129,7 +129,7 @@ fn generic_overloads_lower_to_shader_calls() {
 fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + b.value } }
 
         fn add<T>(a: T, b: T) -> _  { a + b }
-        @compute_shader fn kernel(index: u64, root: Ptr<Cell<u32>>)  {
+        @compute_shader fn kernel(index: u64, root: PtrMut<Cell<u32>>)  {
             root.* = add(Cell<u32> { value = root.value }, Cell<u32> { value = 42 });
         }
     "#,
@@ -248,7 +248,7 @@ fn __add__(self: Narrow, value: u8) -> i32  { i32(value) - 213 }
 fn operator_borrows_and_results_use_ordinary_owner_cleanup() {
     let output = run(r#"export { main };
         import { "$/shared.resin" };
-        struct Payload { drops: Ptr<i32>,
+        struct Payload { drops: PtrMut<i32>,
             
         }
 fn drop(self: RefMut<Payload>)  { self.drops.* = self.drops.* + 1; }
@@ -325,7 +325,7 @@ fn operator_calls_obey_shader_foreign_call_and_recursion_rules() {
 fn __add__(a: Number, b: i32) -> i32  {{ {body} }}
 
             fn add<T>(a: T) -> _  {{ a + 1 }}
-            @compute_shader fn kernel(index: u64, root: Ptr<Number>)  {{
+            @compute_shader fn kernel(index: u64, root: PtrMut<Number>)  {{
                 root.value = add(Number {{ value = root.value }});
             }}
         "#

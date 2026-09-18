@@ -76,7 +76,7 @@ fn shader_objects_are_deduplicated_cached_and_rebuilt_with_imported_helpers() {
         &project.input,
         r#"export { main };
         import { "helper.resin", "$/string.resin", "$/stdio.resin", "$/gpu.resin" };
-        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { pixel(i) }; }
+        @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { pixel(i) }; }
         fn main() -> (() | Err<_>)  {
             if (0 == 1) {
                 let mut gpu = gpu_new()?;
@@ -377,7 +377,7 @@ fn removed_shaders_disappear_from_the_cached_project() {
         &project.input,
         r#"export { main };
         import { "$/gpu.resin" };
-        @compute_shader fn kernel(index: u64, output: Ptr<u32>)  {
+        @compute_shader fn kernel(index: u64, output: PtrMut<u32>)  {
             output.* = u32(index);
         }
         fn main() -> (() | Err<_>)  {
@@ -592,8 +592,8 @@ fn all_spirv_is_generated_before_shader_or_c_compilers_run() {
         &project.input,
         r#"export { main };
         import { "$/gpu.resin" };
-        @compute_shader fn good(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
-        @compute_shader fn bad(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { u32(f64(i) / f64(2.0)) }; }
+        @compute_shader fn good(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
+        @compute_shader fn bad(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { u32(f64(i) / f64(2.0)) }; }
         fn main() -> (() | Err<_>)  {
             if (0 == 1) {
                 let mut gpu = gpu_new()?;

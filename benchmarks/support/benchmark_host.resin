@@ -3,9 +3,9 @@ export { main };
 extern {
 	"benchmark.h": {
 		fn benchmark_argument(argc: i32, argv: Ptr<Ptr<u8>>, index: u32) -> u64;
-		fn benchmark_prepare(input: Ptr<u32>, output: Ptr<u32>, count: u32, seed: u32);
+		fn benchmark_prepare(input: PtrMut<u32>, output: PtrMut<u32>, count: u32, seed: u32);
 		fn benchmark_clock() -> u64;
-		fn benchmark_report(start: u64, end: u64, output: Ptr<u32>, count: u32, measured: i32);
+		fn benchmark_report(start: u64, end: u64, output: PtrMut<u32>, count: u32, measured: i32);
 	},
 };
 

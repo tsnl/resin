@@ -70,18 +70,18 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
         struct Pair { left: i32, right: i32, }
-        fn value() -> (GpuPtr<i32> | Err<_>)  {
+        fn value() -> (GpuPtrMut<i32> | Err<_>)  {
             let mut gpu = gpu_new()?;
             gpu:create(i32(42))
         }
-        fn field() -> (GpuPtr<i32> | Err<_>)  {
+        fn field() -> (GpuPtrMut<i32> | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut pair = gpu:alloc::<i32>(u64(2))?;
             { let borrowed = pair:at(u64(0)); borrowed:store(i32(3)) };
             { let borrowed = pair:at(u64(1)); borrowed:store(i32(5)) };
             (pair:at(u64(1)))
         }
-        fn slice() -> (GpuSpan<i32> | Err<_>)  {
+        fn slice() -> (GpuSpanMut<i32> | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut values = gpu:alloc::<i32>(u64(5))?;
             let mut i: u64 = 0;
@@ -98,7 +98,7 @@ fn inferred_values_and_slices_keep_their_allocation_and_gpu_alive() {
             member:store(member:load() + i32(2));
             { let borrowed = tail:at(u64(0)); borrowed:store(i32(24)) };
             let copied_owner = arc_ptr_alloc([i32(0), i32(0), i32(0)])?; let copied: Ref<_> = copied_owner:get().*;
-            { let borrowed = values:read_only(); borrowed:copy_to(Span<i32> { data = copied_owner:get():lea(u64(0)), length = u64(3) }) };
+            { let borrowed = values:read_only(); borrowed:copy_to(SpanMut<i32> { data = copied_owner:get():lea(u64(0)), length = u64(3) }) };
             (if (number:load() == i32(43) && member:load() == i32(7) && copied:at(u64(0)) == i32(11)
                 && copied:at(u64(1)) == i32(24) && copied:at(u64(2)) == i32(13) && tail.length == u64(2)) { 0 } else { 1 })
         }
@@ -121,10 +121,10 @@ fn increment(self: RefMut<Item>)  { self.value = self.value + i32(1); }
 fn read(self: Ref<Item>) -> i32  { self.value }
 
         struct Outer { item: Item, }
-        fn field() -> (GpuPtr<Outer> | Err<_>)  {
+        fn field() -> (GpuPtrMut<Outer> | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut pointer = gpu:create(Outer { item = Item { value = i32(40) } })?;
-            let mut owner = arc_ptr_alloc::<GpuPtr<Outer>>(pointer:clone())?;
+            let mut owner = arc_ptr_alloc::<GpuPtrMut<Outer>>(pointer:clone())?;
             let indirect: Ref<_> = owner;
             let mut item = indirect:get().*:load();
             item.item:increment();
@@ -162,7 +162,7 @@ fn custom_allocators_must_return_the_requested_size_and_alignment() {
                 r#"export {{ main }};
                 import {{ "gpu.resin", "$/status.resin" }};
                 struct Root {{ left: i64, right: i64, }}
-                @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {{}}
+                @compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {{}}
                 fn main() -> (i32 | Err<_>)  {{
                     let mut gpu = gpu_new()?;
                     {action}(i32(0))
@@ -208,11 +208,11 @@ fn allocator_library(bytes: &str, value: &str) -> String {
 const COMPUTE: &str = r#"export { main };
     import { "$/gpu.resin", "$/status.resin", "$/span.resin", "$/shared.resin" };
     struct FieldsIncrementValues<T0, T1> { increment: T0, values: T1, }
-struct Parameters { increment: u32, values: Span<u32>, }
+struct Parameters { increment: u32, values: SpanMut<u32>, }
 fn clone<A, B>(value: Ref<FieldsIncrementValues<A, B>>) -> FieldsIncrementValues<A, B> {
     FieldsIncrementValues<A, B> { increment = value.increment, values = value.values:clone() }
 }
-    @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
+    @compute_shader fn kernel(index: u64, root: PtrMut<Parameters>)  {
         if (index < root.values.length) {
             let mut item: RefMut<u32> = root.values:at_mut(index);
             item = item + root.increment;
@@ -240,12 +240,47 @@ fn projected_scalar_and_span_arguments_dispatch_and_allow_readback_after_submit(
         again:dispatch(pipeline, arguments:clone(), u32(1), u32(1), u32(1))?;
         again:submit()?;
         let result_owner = arc_ptr_alloc([u32(0), u32(0), u32(0), u32(0)])?; let result: Ref<_> = result_owner:get().*;
-        values:copy_to(Span<u32> { data = result_owner:get():lea(u64(0)), length = u64(4) });
+        values:copy_to(SpanMut<u32> { data = result_owner:get():lea(u64(0)), length = u64(4) });
         (if (result:at(u64(0)) == u32(0) && result:at(u64(1)) == u32(11)
             && result:at(u64(2)) == u32(12) && result:at(u64(3)) == u32(3)) { 0 } else { 1 })
     "#,
     );
     let Some(output) = run(&source) else { return };
+    success(&output);
+}
+
+#[test]
+fn read_only_gpu_views_project_to_read_only_physical_pointers_and_spans() {
+    let Some(output) = run(r#"export { main };
+        import { "$/gpu.resin", "$/span.resin" };
+        struct Parameters { input: Span<u32>, bias: Ptr<u32>, output: SpanMut<u32> }
+        struct Arguments { input: GpuSpan<u32>, bias: GpuPtr<u32>, output: GpuSpanMut<u32> }
+        @compute_shader
+        fn kernel(index: u64, root: Ptr<Parameters>) {
+            if (index < root.output.length) {
+                root.output:at_mut(index) = root.input:at(index) + root.bias.*;
+            };
+        }
+        fn main() -> i32 | Err<_> {
+            let gpu = gpu_new()?;
+            let input = gpu:alloc::<u32>(2)?;
+            input:store(0, 10);
+            input:store(1, 20);
+            let bias = gpu:create(u32(3))?;
+            let output = gpu:alloc::<u32>(2)?;
+            let arguments = Arguments {
+                input = input:read_only(), bias = bias:read_only(), output = output
+            };
+            let pipeline = gpu:create_compute_pipeline(kernel)?;
+            let commands = gpu:start_command_recording()?;
+            commands:dispatch(pipeline, arguments, 1, 1, 1)?;
+            commands:submit()?;
+            assert(output:load(0) == 13 && output:load(1) == 23);
+            0
+        }
+    "#) else {
+        return;
+    };
     success(&output);
 }
 
@@ -258,10 +293,10 @@ fn generic_operator_overloads_execute_on_the_gpu() {
         }
 fn __add__<T>(a: Cell<T>, b: Cell<T>) -> Cell<T>  { Cell<T> { value = a.value + b.value } }
 
-        struct Parameters { values: Span<Cell<u32>>, }
-        struct HostParameters { values: GpuSpan<Cell<u32>>, }
+        struct Parameters { values: SpanMut<Cell<u32>>, }
+        struct HostParameters { values: GpuSpanMut<Cell<u32>>, }
         fn add<T>(a: T, b: T) -> _  { a + b }
-        @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
+        @compute_shader fn kernel(index: u64, root: PtrMut<Parameters>)  {
             if (index < root.values.length) {
                 let mut cell: RefMut<Cell<u32>> = root.values:at_mut(index);
                 cell = add(Cell<u32> { value = cell.value }, Cell<u32> { value = 40 });
@@ -292,8 +327,8 @@ fn source_sequences_project_offsets_and_retain_resources_through_submit() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin" };
         struct FieldsValuesScalar<T0, T1> { values: T0, scalar: T1, }
-struct Root { values: Span<u32>, scalar: Ptr<u32>, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {
+struct Root { values: SpanMut<u32>, scalar: PtrMut<u32>, }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {
             if (index < root.values.length) { root.values:at_mut(index) = root.values:at(index) + u32(10); };
             if (index == u64(0)) { root.scalar.* = u32(42); };
         }
@@ -324,7 +359,7 @@ fn source_pipeline_contract_retagging_cannot_change_the_shader_root() {
         struct FieldsValue<T0> { value: T0, }
 struct Root { value: u32, }
         struct Other { value: u32, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Root>)  {}
+        @compute_shader fn kernel(index: u64, root: PtrMut<Root>)  {}
         fn main() -> (i32 | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut pipeline = gpu:create_compute_pipeline(kernel)?;
@@ -372,7 +407,7 @@ fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
     for access in [
         "let mut value = { let element = values:at(u64(0)); element:load() };",
         "{ let element = values:at(u64(0)); element:store(u32(7)) };",
-        "let source = arc_ptr_alloc([u32(7)])?; let view = Span<u32> { data = source:get():lea(u64(0)), length = u64(1) }; values:copy_from(view);",
+        "let source = arc_ptr_alloc([u32(7)])?; let view = SpanMut<u32> { data = source:get():lea(u64(0)), length = u64(1) }; values:copy_from(view:read_only());",
     ] {
         let source = COMPUTE.replace(
             "ACTION",
@@ -397,11 +432,8 @@ fn recorded_gpu_work_denies_cpu_access_through_all_aliases() {
 #[test]
 fn restricted_gpu_pointers_and_spans_trap_on_disallowed_access() {
     for access in [
-        "let restricted = number:read_only(); restricted:store(i32(8));",
         "let restricted = number:write_only(); let mut value = restricted:load();",
-        "let restricted = number:read_only(); restricted:replace(i32(8));",
         "let restricted = number:write_only(); restricted:replace(i32(8));",
-        "let restricted = values:read_only(); let element = restricted:at(0); element:store(8);",
         "let restricted = values:write_only(); let element = restricted:at(0); let mut value = element:load();",
     ] {
         let source = format!(
@@ -431,18 +463,18 @@ fn inferred_signed_long_pointers_project_and_precomputed_inputs_evaluate_once() 
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
         struct FieldsValueValuesIncrement<T0, T1, T2> { value: T0, values: T1, increment: T2, }
-struct Parameters { value: Ptr<i64>, values: Span<i64>, increment: i64, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
+struct Parameters { value: PtrMut<i64>, values: SpanMut<i64>, increment: i64, }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Parameters>)  {
             if (index == u64(0) && root.value.* < i64(0)) {
                 root.value.* = -root.value.* + root.increment;
                 root.values:at_mut(u64(0)) = root.value.* * i64(2);
             };
         }
-        fn allocation(gpu: Gpu, calls: Ptr<i32>) -> (Gpu, u64)  {
+        fn allocation(gpu: Gpu, calls: PtrMut<i32>) -> (Gpu, u64)  {
             calls.* = calls.* + i32(1);
             (gpu, u64(1))
         }
-        fn launch(pipeline: GpuComputePipeline<Parameters, GpuPipelineOwner>, value: GpuPtr<i64>, values: GpuSpan<i64>, calls: Ptr<i32>) -> _  {
+        fn launch(pipeline: GpuComputePipeline<Parameters, GpuPipelineOwner>, value: GpuPtrMut<i64>, values: GpuSpanMut<i64>, calls: PtrMut<i32>) -> _  {
             calls.* = calls.* + i32(1);
             (pipeline, FieldsValueValuesIncrement<_, _, _> { value = value, values = values, increment = i64(7) }, u32(1), u32(1), u32(1))
         }
@@ -472,14 +504,14 @@ fn returned_typed_pipelines_and_recordings_keep_scoped_resources_alive() {
         import { "$/gpu.resin", "$/span.resin", "$/shared.resin" };
         struct FieldsCommandsValues<T0, T1> { commands: T0, values: T1, }
 struct FieldsValues<T0> { values: T0, }
-struct Parameters { values: Span<u32>, }
-        @compute_shader fn kernel(index: u64, root: Ptr<Parameters>)  {
+struct Parameters { values: SpanMut<u32>, }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Parameters>)  {
             if (index < root.values.length) { root.values:at_mut(index) = u32(42); };
         }
         fn make_pipeline(gpu: Ref<Gpu>) -> (GpuComputePipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
             gpu:create_compute_pipeline(kernel)
         }
-        fn record() -> (FieldsCommandsValues<GpuCommands, GpuSpan<u32>> | Err<_>)  {
+        fn record() -> (FieldsCommandsValues<GpuCommands, GpuSpanMut<u32>> | Err<_>)  {
             let mut gpu = gpu_new()?;
             let mut values = gpu:alloc::<u32>(u64(1))?;
             { let borrowed = values:at(u64(0)); borrowed:store(u32(0)) };
@@ -536,8 +568,8 @@ fn rooted_graphics_stages_receive_automatically_projected_arguments() {
     let Some(output) = run(r#"export { main };
         import { "$/gpu.resin", "$/graphics.resin" };
         struct FieldsColorOffset<T0, T1> { color: T0, offset: T1, }
-struct Parameters { color: Ptr<Color>, offset: f32, }
-        @vertex_shader fn vertex(index: i32, root: Ptr<Parameters>) -> Vertex  {
+struct Parameters { color: PtrMut<Color>, offset: f32, }
+        @vertex_shader fn vertex(index: i32, root: PtrMut<Parameters>) -> Vertex  {
             Vertex {
                 position = Position {
                     x = (if (index == i32(1)) { f32(3.0) } else { f32(-1.0) }) + root.offset,
@@ -547,7 +579,7 @@ struct Parameters { color: Ptr<Color>, offset: f32, }
                 color = Color { r = f32(1.0), g = f32(1.0), b = f32(1.0), a = f32(1.0) },
             }
         }
-        @fragment_shader fn fragment(color: Color, root: Ptr<Parameters>) -> Color  {
+        @fragment_shader fn fragment(color: Color, root: PtrMut<Parameters>) -> Color  {
             Color { r = root.color.r, g = root.color.g, b = root.color.b, a = root.color.a }
         }
         fn make_pipeline(gpu: Ref<Gpu>) -> (GpuGraphicsPipeline<Parameters, GpuPipelineOwner> | Err<_>)  {
@@ -574,13 +606,13 @@ struct Parameters { color: Ptr<Color>, offset: f32, }
     success(&output);
 }
 
-const VIEW_PRIMITIVES: &str = r#"intrinsic "gpu_view_allocate" fn allocate<N>(gpu: Ptr<N>, owner: StrongOwner, bytes: u64, alignment: u64, memory: i32) -> (GpuView | None, i32);
+const VIEW_PRIMITIVES: &str = r#"intrinsic "gpu_view_allocate" fn allocate<N>(gpu: PtrMut<N>, owner: StrongOwner, bytes: u64, alignment: u64, memory: i32) -> (GpuView | None, i32);
     intrinsic "gpu_view_offset" fn offset(view: GpuView, bytes: u64, size: u64, alignment: u64) -> GpuView;
     intrinsic "gpu_view_restrict" fn restrict(view: GpuView, access: u32) -> GpuView;
     intrinsic "gpu_view_load" fn load<T>(view: GpuView) -> T;
     intrinsic "gpu_view_store" fn store<T>(view: GpuView, value: T) -> ();
     intrinsic "gpu_view_replace" fn replace<T>(view: GpuView, value: T) -> T;
-    intrinsic "gpu_view_copy_to" fn copy_to<T>(view: GpuView, count: u64, destination: Ptr<T>, length: u64) -> ();
+    intrinsic "gpu_view_copy_to" fn copy_to<T>(view: GpuView, count: u64, destination: PtrMut<T>, length: u64) -> ();
     intrinsic "gpu_view_copy_from" fn copy_from<T>(view: GpuView, capacity: u64, source: Ptr<T>, count: u64) -> ();
     struct DeviceScalar<T> {
         view: GpuView,
@@ -680,7 +712,7 @@ fn gpu_allocation_rejects_managed_and_opaque_elements_before_access() {
     for (element, diagnostic) in [
         ("ArcPtr<i32>", "plain shared storage"),
         ("WeakPtr<i32>", "plain shared storage"),
-        ("Ptr<Native>", "plain shared storage"),
+        ("PtrMut<Native>", "plain shared storage"),
         ("Native", "no shared host/device layout"),
     ] {
         let source = format!(
@@ -706,13 +738,13 @@ fn gpu_sequences_allow_empty_tail_views_and_report_allocation_overflow() {
             let mut values = gpu:alloc::<u32>(u64(3))?;
             let mut empty = values:slice(u64(3), u64(0));
             let mut alias = empty.data:slice(u64(0), u64(0));
-            alias:copy_to(Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0) });
+            alias:copy_to(SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) });
             let mut zero = gpu:alloc::<u32>(u64(0))?;
-            zero:copy_to(Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0) });
-            { let borrowed = Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0) }; alias:copy_from(borrowed) };
-            { let borrowed = Span<u32> { data = Ptr<u32>(u64(0)), length = u64(0) }; zero:copy_from(borrowed) };
+            zero:copy_to(SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) });
+            { let borrowed = SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) }; alias:copy_from(borrowed:read_only()) };
+            { let borrowed = SpanMut<u32> { data = PtrMut<u32>(u64(0)), length = u64(0) }; zero:copy_from(borrowed:read_only()) };
             let mut overflow = match (gpu:alloc::<u32>(u64(18446744073709551615))) {
-                GpuSpan<u32>(allocated) => { i32(0) },
+                GpuSpanMut<u32>(allocated) => { i32(0) },
                 Err(error) => { runtime_status_code(error) },
             };
             (if (empty.length == u64(0) && alias.length == u64(0) && zero.length == u64(0) && overflow == i32(4)) { i32(0) } else { i32(1) })
@@ -766,11 +798,11 @@ fn host_upload_copies_only_the_source_length_into_a_gpu_slice() {
             let gpu = gpu_new()?;
             let values = gpu:alloc::<u32>(u64(5))?;
             let initial_owner = arc_ptr_alloc([u32(10), u32(20), u32(30), u32(40), u32(50)])?; let initial: Ref<_> = initial_owner:get().*;
-            { let borrowed = Span<u32> { data = initial_owner:get():lea(u64(0)), length = u64(5) }; values:copy_from(borrowed) };
+            { let borrowed = SpanMut<u32> { data = initial_owner:get():lea(u64(0)), length = u64(5) }; values:copy_from(borrowed:read_only()) };
             let patch_owner = arc_ptr_alloc([u32(7), u32(8)])?; let patch: Ref<_> = patch_owner:get().*;
-            { let borrowed_1 = { let borrowed = values:slice(u64(1), u64(3)); borrowed:write_only() }; { let borrowed = Span<u32> { data = patch_owner:get():lea(u64(0)), length = u64(2) }; borrowed_1:copy_from(borrowed) } };
+            { let borrowed_1 = { let borrowed = values:slice(u64(1), u64(3)); borrowed:write_only() }; { let borrowed = SpanMut<u32> { data = patch_owner:get():lea(u64(0)), length = u64(2) }; borrowed_1:copy_from(borrowed:read_only()) } };
             let result_owner = arc_ptr_alloc([u32(0), u32(0), u32(0), u32(0), u32(0)])?; let result: Ref<_> = result_owner:get().*;
-            values:copy_to(Span<u32> { data = result_owner:get():lea(u64(0)), length = u64(5) });
+            values:copy_to(SpanMut<u32> { data = result_owner:get():lea(u64(0)), length = u64(5) });
             assert(result:at(u64(0)) == u32(10) && result:at(u64(1)) == u32(7) && result:at(u64(2)) == u32(8));
             assert(result:at(u64(3)) == u32(40) && result:at(u64(4)) == u32(50));
         }

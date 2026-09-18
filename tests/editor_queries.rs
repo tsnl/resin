@@ -111,7 +111,7 @@ fn declaration_keywords_are_visible_in_outlines_and_struct_textobjects() {
 
 #[test]
 fn reserved_words_have_highlight_rules() {
-    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: i32, } type T = S; fn f() -> (() | Err<Never>)  { let mut x: Span<Ptr<u8>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
+    let source = "export { f }; import { \"x.resin\" }; extern type Handle; struct S { value: i32, } type T = S; fn f() -> (() | Err<Never>)  { let mut x: SpanMut<PtrMut<u8>>; free(x); while (0 < 1) { if (0 == 1) { () } else { () }; }; match (value) { ()(v) => { (v) }, Err(e) => { Err(e) } } }";
     let highlighted = captures(ZED_QUERIES[0].1, source);
     for word in [
         "export", "import", "extern", "type", "struct", "fn", "let", "mut", "if", "else", "while",
@@ -158,7 +158,7 @@ fn none_and_postfix_unwrapping_are_highlighted() {
 
 #[test]
 fn inference_holes_are_highlighted_as_types() {
-    let source = "fn f(p: Ptr<i32>) -> Ptr<_>  { let mut value: _; value = p; value }";
+    let source = "fn f(p: PtrMut<i32>) -> PtrMut<_>  { let mut value: _; value = p; value }";
     let captured = captures(ZED_QUERIES[0].1, source);
     assert!(captured.contains(&("type.builtin".into(), "_".into())));
 }
@@ -178,7 +178,7 @@ extern type Handle;
         struct Number {field: i32,}
         // a function
         fn main (parameter: i32) -> i32  {
-            let mut local = FieldsField<_> {field = 2}; let mut pointer: Ptr<i32>; let mut values = [1, 2];
+            let mut local = FieldsField<_> {field = 2}; let mut pointer: PtrMut<i32>; let mut values = [1, 2];
             native(parameter) + local.field + pointer.*
         }
         fn reset()  {}
@@ -198,7 +198,7 @@ extern type Handle;
         ("highlights", "variable.parameter", "parameter"),
         ("highlights", "type", "Number"),
         ("highlights", "type", "Handle"),
-        ("highlights", "type.builtin", "Ptr"),
+        ("highlights", "type.builtin", "PtrMut"),
         ("highlights", "type.builtin", "i32"),
         ("highlights", "property", "field"),
         ("highlights", "keyword", "export"),
@@ -278,8 +278,7 @@ fn shader_decorators_are_highlighted_as_attributes() {
 
 #[test]
 fn intrinsic_declarations_have_function_navigation_and_parameter_highlights() {
-    let source =
-        r#"intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;"#;
+    let source = r#"intrinsic "pointer_index_mut" fn at<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;"#;
     let highlights = captures(ZED_QUERIES[0].1, source);
     for (kind, text) in [
         ("keyword", "intrinsic"),

@@ -43,6 +43,7 @@ fn constant_function(parameters: Vec<Ty>, result: Ty, value: Value) -> Function 
 
 fn module() -> Module {
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::UInt64),
     };
     let mut module = Module {

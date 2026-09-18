@@ -99,7 +99,7 @@ fn lir_lowering_needs_only_the_resolved_tree() {
 #[test]
 fn generated_files_outlive_lir_and_its_verification_certificate() {
     let module = hir(r#"export { main, kernel };
-        @compute_shader fn kernel(i: u64, output: Ptr<u64>)  { output.* = i; }
+        @compute_shader fn kernel(i: u64, output: PtrMut<u64>)  { output.* = i; }
         fn main() -> i32  { 42 }
     "#);
     let checked = resin_lir::VerifiedModule::new(

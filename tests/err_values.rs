@@ -66,7 +66,7 @@ fn shaders_preserve_error_wrapper_identity() {
     let module = module(
         r#"export { kernel };
         fn error(value: i32) -> Err<i32>  { Err(value) }
-        @compute_shader fn kernel(index: u64, output: Ptr<i32>)  {
+        @compute_shader fn kernel(index: u64, output: PtrMut<i32>)  {
             let mut value: i32 | Err<i32> = error(7);
             match (value) {
                 i32(value) => { output.* = value; },
@@ -169,13 +169,13 @@ fn question_mark_preserves_success_unions_and_destroys_exited_scopes() {
         r#"export { main };
 import { "$/shared.resin" };
 
-        struct Resource { trace: Ptr<i32>, digit: i32,
+        struct Resource { trace: PtrMut<i32>, digit: i32,
             
         }
 fn drop(self: RefMut<Resource>)  { self.trace.* = self.trace.* * 10 + self.digit; }
 
         fn fail() -> i32 | Err<str>  { Err("failure") }
-        fn work(trace: Ptr<i32>) -> i32 | Err<str>  {
+        fn work(trace: PtrMut<i32>) -> i32 | Err<str>  {
             let mut first = Resource { trace = trace, digit = 1 };
             { let mut second = Resource { trace = trace, digit = 2 }; fail()?; };
             0
@@ -226,7 +226,7 @@ fn shaders_propagate_and_widen_error_payloads() {
         r#"export { kernel };
         fn failure() -> i32 | Err<i32>  { Err(7) }
         fn wider() -> i32 | Err<i32 | f32>  { failure()? }
-        @compute_shader fn kernel(index: u64, output: Ptr<i32>)  {
+        @compute_shader fn kernel(index: u64, output: PtrMut<i32>)  {
             match (wider()) {
                 i32(value) => { output.* = value; },
                 Err(value) => { match (value) { i32(code) => { output.* = code; }, f32(_) => {} } },
@@ -242,7 +242,7 @@ fn propagation_checks_every_error_and_keeps_mutable_pointers_invariant() {
     for source in [
         "fn fail() -> i32 | Err<str>  { Err(\"x\") } fn wrong() -> i32  { fail()? }",
         "fn fail() -> i32 | Err<str>  { Err(\"x\") } fn wrong() -> i32 | Err<i32>  { fail()? }",
-        "fn wrong(value: Ptr<Err<str>>) -> Ptr<Err<str | i32>>  { value }",
+        "fn wrong(value: PtrMut<Err<str>>) -> PtrMut<Err<str | i32>>  { value }",
         "fn wrong(value: i32)  { match (value) { Err(_) => {} } }",
         "fn wrong(value: i32 | Err<str>)  { match (value) { Err(_) => {}, Err(_) => {}, i32(_) => {} } }",
     ] {

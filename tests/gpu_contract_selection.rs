@@ -38,7 +38,7 @@ struct Commands {
 @gpu_draw
     fn draw(self: Commands, pipeline: PipelineOwner, arguments: GpuArguments | None, count: u32) -> (() | Err<Failure>)  { (()) }
 
-struct Params { value: Ptr<i32>, }
+struct Params { value: PtrMut<i32>, }
 "#;
 
 const USE_PROJECTION: &str = r#"struct FieldsValue<T0> { value: T0, }
@@ -50,7 +50,7 @@ fn record(commands: Commands, pipeline: ComputeProgram<Params, PipelineOwner>, v
 fn pointer(name: &str) -> String {
     format!(
         r#"struct {name}<T> {{ view: GpuView, }}
-        intrinsic "gpu_pointer_projection" fn project_{}<T>(value: {name}<T>) -> Ptr<T>;"#,
+        intrinsic "gpu_pointer_projection" fn project_{}<T>(value: {name}<T>) -> PtrMut<T>;"#,
         name.to_lowercase()
     )
 }

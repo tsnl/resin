@@ -65,15 +65,24 @@ pub(super) fn define(
     let Type::Record { fields } = body(context, &input.annotation.ty).ok_or_else(invalid)? else {
         return Err(invalid());
     };
+    let pointer_target = match kind {
+        GpuProjectionKind::Pointer => output.clone(),
+        GpuProjectionKind::Sequence => {
+            let Some(Type::Record { fields }) = body(context, output) else {
+                return Err(invalid());
+            };
+            fields.first().ok_or_else(invalid)?.ty.clone()
+        }
+    };
+    let Type::Pointer { pointee, .. } = &pointer_target else {
+        return Err(invalid());
+    };
+    if pointee.as_ref() != &bound {
+        return Err(invalid());
+    }
     match kind {
         GpuProjectionKind::Pointer => {
-            if fields.len() != 1
-                || fields[0].ty != Type::GpuView
-                || *output
-                    != (Type::Pointer {
-                        pointee: Box::new(bound.clone()),
-                    })
-            {
+            if fields.len() != 1 || fields[0].ty != Type::GpuView {
                 return Err(invalid());
             }
         }
@@ -88,10 +97,6 @@ pub(super) fn define(
                 || output_fields.len() != 2
                 || fields[1].ty != Type::UInt64
                 || output_fields[1].ty != Type::UInt64
-                || output_fields[0].ty
-                    != (Type::Pointer {
-                        pointee: Box::new(bound.clone()),
-                    })
             {
                 return Err(invalid());
             }
@@ -102,12 +107,13 @@ pub(super) fn define(
             else {
                 return Err(invalid());
             };
-            let pointer = context
-                .nominal_schemes
-                .get(pointer)
-                .and_then(|scheme| scheme.gpu_projection.as_ref())
-                .ok_or_else(invalid)?;
-            if arguments != &[bound] || pointer.kind != GpuProjectionKind::Pointer {
+            let scheme = context.nominal_schemes.get(pointer).ok_or_else(invalid)?;
+            let projection = scheme.gpu_projection.as_ref().ok_or_else(invalid)?;
+            if arguments != std::slice::from_ref(&bound)
+                || projection.kind != GpuProjectionKind::Pointer
+                || substitute(&projection.target, &scheme.type_params, arguments.clone())
+                    != Some(pointer_target.clone())
+            {
                 return Err(invalid());
             }
         }

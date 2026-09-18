@@ -12,6 +12,10 @@ impl FunctionLowering<'_> {
         if self.function.terminated() {
             return Ok(to.clone());
         }
+        if from.read_only().as_ref() == Some(to) {
+            self.emit(Instr::ReadOnly);
+            return Ok(to.clone());
+        }
         if &from != to {
             if !from.widens_to(to) {
                 return self

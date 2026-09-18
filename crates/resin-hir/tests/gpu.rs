@@ -18,9 +18,9 @@ fn compute_workgroup_size_is_an_ordinary_source_name() {
 // declarations; no compiler type or method is selected from a public spelling.
 const PIPELINES: &str = r#"struct Failure {}
 struct DeviceReference<T> { allocation: GpuView, }
-struct HostRange<T> { data: Ptr<T>, length: u64, }
+struct HostRange<T> { data: PtrMut<T>, length: u64, }
 struct DeviceRange<T> { data: DeviceReference<T>, length: u64, }
-intrinsic "gpu_pointer_projection" fn pointer_projection<T>(value: DeviceReference<T>) -> Ptr<T>;
+intrinsic "gpu_pointer_projection" fn pointer_projection<T>(value: DeviceReference<T>) -> PtrMut<T>;
 intrinsic "gpu_span_projection" fn span_projection<T>(value: DeviceRange<T>) -> HostRange<T>;
 struct ComputeProgram<Root, Owner> { contract: GpuPipelineContract, }
 struct GraphicsProgram<Root, Owner> { contract: GpuPipelineContract, }
@@ -59,7 +59,7 @@ struct Commands {
 struct HostParams<T> { scale: f32, values: T, }
 struct WrongParams<T> { scale: f32, wrong: T, }
 struct Params { scale: f32, values: HostRange<i32>, }
-@compute_shader fn kernel(index: u64, root: Ptr<Params>)  {}
+@compute_shader fn kernel(index: u64, root: PtrMut<Params>)  {}
 "#;
 
 fn pipelines(source: &str) -> Result<Module, resin_source::SourceError> {
@@ -89,10 +89,10 @@ fn main(values: DeviceRange<i32>) -> (() | Err<Failure>) {{
 #[test]
 fn former_gpu_type_names_are_ordinary_generic_declarations() {
     generate(
-        r#"struct GpuPtr<T> { value: T,  }
-fn gpu_ptr_new<T>(value: T) -> GpuPtr<T>  { GpuPtr<T> { value = value } }
+        r#"struct GpuPtrMut<T> { value: T,  }
+fn gpu_ptr_new<T>(value: T) -> GpuPtrMut<T>  { GpuPtrMut<T> { value = value } }
 
-        struct GpuSpan<T> { value: T, }
+        struct GpuSpanMut<T> { value: T, }
         struct GpuComputePipeline<T> { value: T, }
         struct GpuGraphicsPipeline<T> { value: T, }
         fn main() -> i32  { gpu_ptr_new::<i32>(42).value }
@@ -111,7 +111,7 @@ fn allocator_registration_does_not_synthesize_constructor_methods() {
 fn opaque_gpu_views_cannot_be_dereferenced_or_cast_to_raw_addresses() {
     for (body, expected) in [
         ("value.*", "dereference requires a pointer"),
-        ("Ptr<i32>(value)", "TypeMismatch"),
+        ("PtrMut<i32>(value)", "TypeMismatch"),
         ("u64(value)", "TypeMismatch"),
         ("value.data", "field access requires a record"),
     ] {
@@ -176,7 +176,7 @@ fn create(gpu: Device) -> (ComputeProgram<Params, PipelineOwner> | Err<Failure>)
 fn creation_requires_direct_decorated_shader_declarations() {
     for (expression, expected) in [
         (
-            "gpu:compute((Ptr<u8>(u64(0)), u64(0)))",
+            "gpu:compute((PtrMut<u8>(u64(0)), u64(0)))",
             "requires decorated shader declarations",
         ),
         ("gpu:compute(alias)", "requires direct shader declarations"),
@@ -190,8 +190,8 @@ fn creation_requires_direct_decorated_shader_declarations() {
         ),
     ] {
         let error = pipelines(&format!(
-            r#"fn ordinary(index: u64, root: Ptr<Params>)  {{}}
-            fn choose() -> (u64, Ptr<Params>) -> ()  {{ kernel }}
+            r#"fn ordinary(index: u64, root: PtrMut<Params>)  {{}}
+            fn choose() -> (u64, PtrMut<Params>) -> ()  {{ kernel }}
             fn main(gpu: Device) -> _  {{ let mut alias = kernel; {expression} }}
         "#
         ))

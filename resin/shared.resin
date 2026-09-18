@@ -24,7 +24,7 @@ fn arc_ptr_alloc<T>(initial: T) -> (ArcPtr<T> | Err<OutOfMemory>) {
 	}
 }
 
-fn get<T>(self: Ref<ArcPtr<T>>) -> Ptr<T> {
+fn get<T>(self: Ref<ArcPtr<T>>) -> PtrMut<T> {
 	owner_data::<T>(self.owner)
 }
 
@@ -48,8 +48,8 @@ fn arc_span_alloc<T>(count: u64, initial: T) -> (ArcSpan<T> | Err<OutOfMemory>) 
 	}
 }
 
-fn get<T>(self: Ref<ArcSpan<T>>) -> Span<T> {
-	Span<T> { data = owner_data::<T>(self.owner), length = owner_length(self.owner) }
+fn get<T>(self: Ref<ArcSpan<T>>) -> SpanMut<T> {
+	SpanMut<T> { data = owner_data::<T>(self.owner), length = owner_length(self.owner) }
 }
 
 fn downgrade<T>(self: Ref<ArcSpan<T>>) -> WeakSpan<T> {
@@ -94,7 +94,7 @@ fn upgrade<T>(self: Ref<WeakSpan<T>>) -> ArcSpan<T> | None {
 
 intrinsic "owner_create" fn owner_create<T>(initial: T) -> StrongOwner | None;
 intrinsic "owner_allocate" fn owner_allocate<T>(count: u64, initial: T) -> StrongOwner | None;
-intrinsic "owner_data" fn owner_data<T>(owner: Ref<StrongOwner>) -> Ptr<T>;
+intrinsic "owner_data" fn owner_data<T>(owner: Ref<StrongOwner>) -> PtrMut<T>;
 intrinsic "owner_length" fn owner_length(owner: Ref<StrongOwner>) -> u64;
 intrinsic "owner_downgrade" fn owner_downgrade(owner: Ref<StrongOwner>) -> WeakOwner;
 intrinsic "owner_upgrade" fn owner_upgrade(owner: Ref<WeakOwner>) -> StrongOwner | None;

@@ -120,7 +120,7 @@ fn private_names_are_not_visible_to_consumers() {
         (
             "export {};",
             "extern type Hidden;",
-            "fn main() -> ()  { let mut x = Ptr<Hidden>(u64(0)); }",
+            "fn main() -> ()  { let mut x = PtrMut<Hidden>(u64(0)); }",
             "UnboundType",
         ),
         (
@@ -415,15 +415,15 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
     let project = Project::new(&[
         (
             "left.resin",
-            "export { left }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; } fn left (i: u32, output: Ptr<u32>)  { kernel(u64(i), output); }",
+            "export { left }; @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; } fn left (i: u32, output: PtrMut<u32>)  { kernel(u64(i), output); }",
         ),
         (
             "right.resin",
-            "export { right }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(2) }; } fn right (i: u32, output: Ptr<u32>)  { kernel(u64(i), output); }",
+            "export { right }; @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i + u32(2) }; } fn right (i: u32, output: PtrMut<u32>)  { kernel(u64(i), output); }",
         ),
         (
             "main.resin",
-            "export { kernel, main }; import { \"left.resin\", \"right.resin\", \"$/gpu.resin\" }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); left(i, output); right(i, output); } fn main() -> (() | Err<_>)  { if (0 == 1) { { let borrowed = gpu_new()?; borrowed:create_compute_pipeline(kernel) }?; }; (()) }",
+            "export { kernel, main }; import { \"left.resin\", \"right.resin\", \"$/gpu.resin\" }; @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); left(i, output); right(i, output); } fn main() -> (() | Err<_>)  { if (0 == 1) { { let borrowed = gpu_new()?; borrowed:create_compute_pipeline(kernel) }?; }; (()) }",
         ),
     ]);
     let module = project.compile().unwrap();
@@ -454,7 +454,7 @@ fn shader_declarations_preserve_the_entry_files_export_scope() {
     let project = Project::new(&[
         (
             "library.resin",
-            "export { kernel }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i }; }",
+            "export { kernel }; @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i }; }",
         ),
         ("main.resin", "import { \"library.resin\" };"),
     ]);
@@ -655,7 +655,7 @@ fn functions_cannot_capture_another_functions_locals() {
 #[test]
 fn shader_objects_can_reference_private_helpers() {
     let module = support::module(
-        "export { main }; import { \"$/gpu.resin\" }; @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main() -> (() | Err<_>)  { if (0 == 1) { { let borrowed = gpu_new()?; borrowed:create_compute_pipeline(kernel) }?; }; (()) }",
+        "export { main }; import { \"$/gpu.resin\" }; @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main() -> (() | Err<_>)  { if (0 == 1) { { let borrowed = gpu_new()?; borrowed:create_compute_pipeline(kernel) }?; }; (()) }",
     );
     assert!(!module.entries.contains_key("kernel"));
     assert!(

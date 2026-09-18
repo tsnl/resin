@@ -92,6 +92,7 @@ impl FunctionLowering<'_> {
                 mutable,
             } => Ok(if addressable {
                 Ty::Pointer {
+                    mutable,
                     pointee: Box::new(ty),
                 }
             } else {
@@ -110,9 +111,9 @@ impl FunctionLowering<'_> {
     pub(super) fn gen_borrow(&mut self, term: &Term, target: &Ty) -> Result<Ty, LowerError> {
         let place = self.gen_place(term)?;
         let (referent, source_mutable) = match place {
-            Ty::Pointer { pointee } => {
+            Ty::Pointer { pointee, mutable } => {
                 self.emit(Instr::Borrow);
-                (pointee, true)
+                (pointee, mutable)
             }
             Ty::Reference { referent, mutable } => (referent, mutable),
             _ => unreachable!("place has an address"),
@@ -175,7 +176,10 @@ impl FunctionLowering<'_> {
                 Ok(Operand::Place {
                     ty: pointee,
                     addressable: matches!(pointer.ty, Ty::Pointer { .. }),
-                    mutable: !matches!(pointer.ty, Ty::Reference { mutable: false, .. }),
+                    mutable: !matches!(
+                        pointer.ty,
+                        Ty::Reference { mutable: false, .. } | Ty::Pointer { mutable: false, .. }
+                    ),
                 })
             }
             _ => self.gen_term(term, None).map(Operand::Value),
@@ -199,7 +203,10 @@ impl FunctionLowering<'_> {
             if let Some(pointee) = base_ty.deref_target() {
                 let pointee = pointee.clone();
                 addressable = matches!(base_ty, Ty::Pointer { .. });
-                mutable = !matches!(base_ty, Ty::Reference { mutable: false, .. });
+                mutable = !matches!(
+                    base_ty,
+                    Ty::Reference { mutable: false, .. } | Ty::Pointer { mutable: false, .. }
+                );
                 if is_place {
                     self.emit(Instr::Load);
                 }

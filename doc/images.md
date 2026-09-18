@@ -12,7 +12,7 @@ A zero channel count preserves the file's channel count; one through four reques
 that number of output channels.
 
 `image:width()`, `image:height()`, and `image:channels()` return dimensions.
-`image:pixels()` borrows a packed `Span<u8>`. Keep the image owner alive while
+`image:pixels()` borrows a packed `SpanMut<u8>`. Keep the image owner alive while
 using that view. `image:clone()` retains shared ownership; the final owner releases
 the pixels. `image:write_png(path)` writes its dimensions and pixels to a PNG.
 

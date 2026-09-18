@@ -226,8 +226,9 @@ pub unsafe extern "C" fn resin_gpu_projection_pointer(
     value: ResinGpuPtr,
     bytes: usize,
     alignment: usize,
+    access: u32,
 ) -> ResinDeviceAddress {
-    unsafe { gpu_view::projection_pointer(projection, value, bytes, alignment) }
+    unsafe { gpu_view::projection_pointer(projection, value, bytes, alignment, access) }
 }
 
 /// Record a projected dispatch. Success retains the projection and prevents

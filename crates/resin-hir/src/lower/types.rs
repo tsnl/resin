@@ -31,7 +31,8 @@ pub(super) fn ty(source: &Ty) -> crate::Type {
             mutable: *mutable,
             referent: Box::new(ty(referent)),
         },
-        Ty::Pointer { pointee } => crate::Type::Pointer {
+        Ty::Pointer { pointee, mutable } => crate::Type::Pointer {
+            mutable: *mutable,
             pointee: Box::new(ty(pointee)),
         },
         Ty::StrongOwner => crate::Type::StrongOwner,

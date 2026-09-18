@@ -117,7 +117,7 @@ fn target_sets_are_canonicalized_for_scheduling() {
 fn the_same_declaration_can_be_requested_on_host_and_shader() {
     let source = Source::new(
         "entry",
-        "export { kernel }; @compute_shader fn kernel(i: u64, out: Ptr<u32>)  { out.* = u32(i); }",
+        "export { kernel }; @compute_shader fn kernel(i: u64, out: PtrMut<u32>)  { out.* = u32(i); }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -198,7 +198,7 @@ fn demanded_nominals_retain_field_conversions_and_real_drop_identities() {
 fn unsupported_shader_operations_fail_during_compilation_with_application_notes() {
     let source = Source::new(
         "entry",
-        "export { main, kernel }; fn main() -> i32  { 42 } @compute_shader fn kernel(i: u64, out: Ptr<u32>)  { out.* = u32(f64(i) / f64(2.0)); }",
+        "export { main, kernel }; fn main() -> i32  { 42 } @compute_shader fn kernel(i: u64, out: PtrMut<u32>)  { out.* = u32(f64(i) / f64(2.0)); }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source.clone(), &mut loader, None);
@@ -222,7 +222,7 @@ fn unsupported_shader_operations_fail_during_compilation_with_application_notes(
 fn shader_recursion_is_rejected_before_publishing_lir() {
     let source = Source::new(
         "entry",
-        "export { kernel }; fn helper(i: u64, out: Ptr<u32>)  { kernel(i, out); } @compute_shader fn kernel(i: u64, out: Ptr<u32>)  { helper(i, out); }",
+        "export { kernel }; fn helper(i: u64, out: PtrMut<u32>)  { kernel(i, out); } @compute_shader fn kernel(i: u64, out: PtrMut<u32>)  { helper(i, out); }",
     );
     let mut loader = loader();
     let output = support::frontend::analyze(source, &mut loader, None);
@@ -259,7 +259,7 @@ fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
         let source = Source::new(
             "entry",
             format!(
-                "export {{ kernel }}; {helper} @compute_shader fn kernel(i: u64, out: Ptr<u32>)  {{ {body} }}"
+                "export {{ kernel }}; {helper} @compute_shader fn kernel(i: u64, out: PtrMut<u32>)  {{ {body} }}"
             ),
         );
         let output = support::frontend::analyze(source, &mut loader(), None);
@@ -278,10 +278,10 @@ fn shader_calls_cannot_enter_foreign_functions_or_store_function_values() {
 fn shader_pointer_casts_fail_before_codegen_including_generic_helpers() {
     for (helper, body, cast) in [
         ("", "u64(out);", "u64(out)"),
-        ("", "Ptr<u32>(i);", "Ptr<u32>(i)"),
-        ("", "Ptr<u8>(out);", "Ptr<u8>(out)"),
+        ("", "PtrMut<u32>(i);", "PtrMut<u32>(i)"),
+        ("", "PtrMut<u8>(out);", "PtrMut<u8>(out)"),
         (
-            "fn address<T>(p: Ptr<T>) -> u64  { u64(p) }",
+            "fn address<T>(p: PtrMut<T>) -> u64  { u64(p) }",
             "address(out);",
             "u64(p)",
         ),
@@ -289,7 +289,7 @@ fn shader_pointer_casts_fail_before_codegen_including_generic_helpers() {
         let source = Source::new(
             "pointer.resin",
             format!(
-                "export {{ kernel }}; {helper} @compute_shader fn kernel(i: u64, out: Ptr<u32>)  {{ {body} }}"
+                "export {{ kernel }}; {helper} @compute_shader fn kernel(i: u64, out: PtrMut<u32>)  {{ {body} }}"
             ),
         );
         let output = support::frontend::analyze(source.clone(), &mut loader(), None);

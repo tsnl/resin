@@ -124,12 +124,12 @@ fn generic_drop_hooks_use_each_owner_argument_and_reverse_scope_order() {
     let output = run(r#"export { main };
 import { "$/shared.resin" };
 
-        struct Tracked<T> { trace: Ptr<u64>, value: T,
+        struct Tracked<T> { trace: PtrMut<u64>, value: T,
             
             
             
         }
-fn tracked_make<T>(trace: Ptr<u64>, value: T) -> Tracked<T>  {
+fn tracked_make<T>(trace: PtrMut<u64>, value: T) -> Tracked<T>  {
                 Tracked<T> { trace = trace, value = value }
             }
 
@@ -163,7 +163,7 @@ fn generic_drop_hooks_run_on_result_propagation() {
 import { "$/shared.resin" };
 
         struct Failed {}
-        struct Tracked<T> { trace: Ptr<u64>, value: T,
+        struct Tracked<T> { trace: PtrMut<u64>, value: T,
             
         }
 fn drop<T>(self: RefMut<Tracked<T>>)  {
@@ -171,7 +171,7 @@ fn drop<T>(self: RefMut<Tracked<T>>)  {
             }
 
         fn fail() -> (() | Err<Failed>)  { Err(Failed {}) }
-        fn work<T>(trace: Ptr<u64>, value: T) -> (() | Err<_>)  {
+        fn work<T>(trace: PtrMut<u64>, value: T) -> (() | Err<_>)  {
             let mut local = Tracked<T> { trace = trace, value = value };
             fail()?;
             (())
@@ -251,9 +251,9 @@ fn shader_receivers_use_the_specialized_generic_owner_method() {
         struct Cell<T> { value: T,
             
         }
-fn increment<T>(self: Ptr<Cell<T>>)  { self.value = self.value + 1; }
+fn increment<T>(self: PtrMut<Cell<T>>)  { self.value = self.value + 1; }
 
-        @compute_shader fn kernel(index: u64, root: Ptr<Cell<u32>>)  { root:increment(); }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Cell<u32>>)  { root:increment(); }
     "#,
     );
     let project = support::project::Project::new(&module, None).unwrap();

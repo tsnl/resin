@@ -12,7 +12,7 @@ fn fibonacci(n: i32) -> _ {
 
 fn main() -> () | Err<_> {
 	let mut n: _;
-	let mut pointer: Ptr<_>;
+	let mut pointer: PtrMut<_>;
 	n = arc_ptr_alloc(fibonacci(10))?;
 	pointer = n:get();
 	let text = fmt("fibonacci(10) = {0}\n", (pointer.*,));

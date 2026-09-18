@@ -139,7 +139,8 @@ ResinDeviceAddress resin_gpu_projection_pointer(
     ResinArc *projection,
     ResinGpuPtr value,
     size_t bytes,
-    size_t alignment);
+    size_t alignment,
+    uint32_t access);
 /* These borrow projection; success retains it through completion/cancellation. */
 ResinStatus resin_gpu_projected_dispatch(
     ResinCommandBuffer *commands,

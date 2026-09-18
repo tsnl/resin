@@ -37,17 +37,17 @@ fn local_aliases_capture_outer_binders_without_capturing_their_own_arguments() {
 #[test]
 fn alias_arity_holes_and_cycles_are_definition_errors() {
     for source in [
-        "type Item<T> = Ptr<T>; fn f(value: Item)  {}",
-        "type Item<T> = Ptr<T>; fn f(value: Item<i32, i32>)  {}",
+        "type Item<T> = PtrMut<T>; fn f(value: Item)  {}",
+        "type Item<T> = PtrMut<T>; fn f(value: Item<i32, i32>)  {}",
         "type Item<T, T> = T;",
-        "type Item<T> = Ptr<_>;",
-        "type Item<T> = Ptr<Item<T>>;",
+        "type Item<T> = PtrMut<_>;",
+        "type Item<T> = PtrMut<Item<T>>;",
         "type Item<T> = Next<T>; type Next<T> = Item<T>;",
         "type Unused<T> = i32; fn main()  { let mut item: Unused<_>; item = 0; }",
     ] {
         assert!(compile(source).is_err(), "{source}");
     }
-    let error = compile("type Item<T> = Ptr<Item<T>>;").unwrap_err();
+    let error = compile("type Item<T> = PtrMut<Item<T>>;").unwrap_err();
     assert!(
         error.to_string().contains("recursive type alias"),
         "{error}"
@@ -68,7 +68,7 @@ fn alias_expansion_has_its_own_size_limit() {
 fn alias_expansion_has_its_own_depth_limit() {
     let mut source = "type A0 = i32;".to_owned();
     for index in 1..260 {
-        source.push_str(&format!("type A{index} = Ptr<A{}>;", index - 1));
+        source.push_str(&format!("type A{index} = PtrMut<A{}>;", index - 1));
     }
     let error = compile(&source).unwrap_err();
     assert!(error.to_string().contains("depth limit"), "{error}");

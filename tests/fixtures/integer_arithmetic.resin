@@ -3,9 +3,9 @@ export { kernel };
 type Integer = i64;
 struct Input { left: Integer, right: Integer, operation: u32 }
 struct Output { value: Integer, progress: u32 }
-struct Root { count: u64, inputs: Ptr<Input>, outputs: Ptr<Output> }
+struct Root { count: u64, inputs: PtrMut<Input>, outputs: PtrMut<Output> }
 
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_index_mut" fn fixture_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;
 
 fn arithmetic<T>(left: T, right: T, operation: u32) -> T {
 	if (operation == 0) {
@@ -37,7 +37,7 @@ fn evaluate(input: Input, output: RefMut<Output>) {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(index: u64, root: PtrMut<Root>) {
 	if (index >= root.count) {
 		return;
 	};

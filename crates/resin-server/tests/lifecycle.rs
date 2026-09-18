@@ -289,7 +289,7 @@ async fn specialization_diagnostics_survive_cache_publication_and_http_transport
     let source = r#"export { main };
         struct Cell { value: i32 }
         fn get(cell: Ref<Cell>) -> Ref<i32> { cell.value }
-        fn address<T>(cell: Ref<T>) -> Ptr<i32> { &cell:get() }
+        fn address<T>(cell: Ref<T>) -> PtrMut<i32> { &cell:get() }
         fn main() { let cell = Cell { value = 1 }; address(cell); }
     "#;
     let client = reqwest::Client::new();

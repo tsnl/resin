@@ -114,12 +114,14 @@ borrowing them; their cleanup follows those locals’ scopes. See
 
 | Access or ownership | One value | Sequence |
 | --- | --- | --- |
-| Nonowning | `Ptr<T>` | `Span<T>` |
+| Nonowning, read-only | `Ptr<T>` | `Span<T>` |
+| Nonowning, writable | `PtrMut<T>` | `SpanMut<T>` |
 | Shared host ownership | `ArcPtr<T>` | `ArcSpan<T>` |
 | Weak host ownership | `WeakPtr<T>` | `WeakSpan<T>` |
-| GPU ownership | `GpuPtr<T>` | `GpuSpan<T>` |
+| GPU ownership, read-only | `GpuPtr<T>` | `GpuSpan<T>` |
+| GPU ownership, writable | `GpuPtrMut<T>` | `GpuSpanMut<T>` |
 
-Except for `Ptr<T>`, these are ordinary generic library structs. Import
+Except for the raw pointer kinds, these are ordinary generic library structs. Import
 `$/span.resin`, `$/shared.resin`, or `$/gpu.resin` as appropriate. `ArcPtr<Span<T>>`
 owns a descriptor; `ArcSpan<T>` owns its elements. There are no unsized payloads.
 

@@ -308,6 +308,8 @@ pub(super) fn ascription(
 ) -> Result<Option<Vec<Conv>>, TypeError> {
     let step = if from == to {
         return Ok(Some(Vec::new()));
+    } else if from.read_only().as_ref() == Some(to) {
+        Conv::ReadOnly
     } else if matches!(to, Ty::Error { payload } if payload.as_ref() == from) {
         Conv::WrapError
     } else if matches!(from, Ty::Error { payload } if payload.as_ref() == to) {
@@ -365,10 +367,10 @@ pub(super) fn validate_shader(
         [input, Ty::Pointer { .. }] => (input, true),
         _ => {
             return Err(if stage == "compute" {
-                "invalid @compute_shader signature: expected (u64, Ptr<T>) -> () with an optional third Workgroup<State> / RefMut<State> parameter".into()
+                "invalid @compute_shader signature: expected (u64, Ptr<T>/PtrMut<T>) -> () with an optional third Workgroup<State> / RefMut<State> parameter".into()
             } else {
                 format!(
-                    "invalid @{stage}_shader signature: expected one input and an optional Ptr<T> root"
+                    "invalid @{stage}_shader signature: expected one input and an optional Ptr<T>/PtrMut<T> root"
                 )
             });
         }
@@ -429,10 +431,11 @@ pub(super) fn validate_shader(
             "invalid @{stage}_shader signature: {}",
             match stage {
                 "compute" =>
-                    "expected (u64, Ptr<T>) -> () with an optional third Workgroup<State> / RefMut<State> parameter",
-                "vertex" => "expected i32 or (i32, Ptr<T>) returning a position/color record",
+                    "expected (u64, Ptr<T>/PtrMut<T>) -> () with an optional third Workgroup<State> / RefMut<State> parameter",
+                "vertex" =>
+                    "expected i32 or (i32, Ptr<T>/PtrMut<T>) returning a position/color record",
                 "fragment" =>
-                    "expected Color or (Color, Ptr<T>) returning Color or Color | None with f32 r/g/b/a fields",
+                    "expected Color or (Color, Ptr<T>/PtrMut<T>) returning Color or Color | None with f32 r/g/b/a fields",
                 _ => "unknown shader stage",
             }
         ))
@@ -508,7 +511,7 @@ pub(super) fn pipeline_root(
 }
 
 fn shader_root(parameters: &[Ty]) -> Result<Ty, String> {
-    let Some(Ty::Pointer { pointee }) = parameters.get(1) else {
+    let Some(Ty::Pointer { pointee, .. }) = parameters.get(1) else {
         return Err("shader root parameter must be a pointer".into());
     };
     Ok(*pointee.clone())
@@ -609,7 +612,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
                 return Err("shader cannot consume a managed GPU view or projected arguments".into());
             }
             Ty::Reference { referent, .. } => pending.push(referent),
-            Ty::Pointer { pointee: element } => {
+            Ty::Pointer { pointee: element, .. } => {
                 crate::layout::layout(definitions, element).map_err(|error| error.to_string())?;
                 pending.push(element);
             }
@@ -630,6 +633,7 @@ pub(super) fn shader_value_type(definitions: &[TypeDef], ty: &Ty) -> Result<(), 
 fn byte_parameters(context: &TyperContext, args: &[Ty]) -> Result<(), TypeError> {
     context.same(
         &Ty::Pointer {
+            mutable: false,
             pointee: Box::new(Ty::UInt8),
         },
         &args[0],

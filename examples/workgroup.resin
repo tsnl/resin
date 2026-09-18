@@ -3,7 +3,7 @@ export { main, kernel };
 import { "$/workgroup.resin", "$/span.resin", "$/shared.resin" };
 
 struct State { left: f32, right: f32 }
-struct Root { output: Span<f32> }
+struct Root { output: SpanMut<f32> }
 
 // Helpers receive the same ordinary mutable reference as the entry.
 fn publish(group: Workgroup<State>) {
@@ -14,7 +14,7 @@ fn sum(left: Ref<f32>, right: Ref<f32>) -> f32 {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>, group: Workgroup<State>) {
+fn kernel(index: u64, root: PtrMut<Root>, group: Workgroup<State>) {
 	let lane = group:lane_index();
 	let width = group:lane_count();
 	let base = index - lane;

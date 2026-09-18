@@ -16,7 +16,7 @@ fn optional_values_match_and_unwrap_once() {
     let output = run(r#"
 import { "$/shared.resin" };
 struct Item { number: i32, }
-        fn make(calls: Ptr<i32>) -> Item | None  { calls.* = calls.* + 1; Item { number = 41 } }
+        fn make(calls: PtrMut<i32>) -> Item | None  { calls.* = calls.* + 1; Item { number = 41 } }
         fn main() -> i32 | Err<_> {
             let calls_owner = arc_ptr_alloc(0)?; let calls: Ref<_> = calls_owner:get().*;
             let mut number = make(calls_owner:get())!.number + 1;
@@ -107,11 +107,11 @@ struct FieldsNumber<T0> { number: T0, }
 type Callback = (i32) -> i32;
         type Record = FieldsNumber<i32>;
         fn increment(n: i32) -> i32  { n + 1 }
-        fn select(p: Ptr<i32>, use_pointer: bool) -> Ptr<i32> | Callback  { if (use_pointer) { p } else { increment } }
-        fn widen(value: Ptr<i32> | Callback) -> None | Record | Callback | Ptr<i32>  { value }
-        fn read(value: None | Record | Callback | Ptr<i32>) -> i32  {
+        fn select(p: PtrMut<i32>, use_pointer: bool) -> PtrMut<i32> | Callback  { if (use_pointer) { p } else { increment } }
+        fn widen(value: PtrMut<i32> | Callback) -> None | Record | Callback | PtrMut<i32>  { value }
+        fn read(value: None | Record | Callback | PtrMut<i32>) -> i32  {
             match (value) {
-                None => { 0 }, Record(r) => { r.number }, Callback(f) => { f(19) }, Ptr<i32>(p) => { p.* }
+                None => { 0 }, Record(r) => { r.number }, Callback(f) => { f(19) }, PtrMut<i32>(p) => { p.* }
             }
         }
         fn main() -> i32 | Err<_> {
@@ -135,7 +135,7 @@ struct FieldsNumber<T0> { number: T0, }
 type Record = FieldsNumber<u32>;
         fn record() -> Record | None  { FieldsNumber<_> { number = u32(42) } }
         fn field(r: Record) -> u32 | None  { r.number }
-        fn load(p: Ptr<u32>) -> u32 | None  { p.* }
+        fn load(p: PtrMut<u32>) -> u32 | None  { p.* }
         fn literal() -> u32 | None  { 42 }
         fn operator(n: u32) -> u32 | None  { n + u32(1) }
         fn compare(n: u32) -> bool | None  { n == u32(42) }
@@ -178,8 +178,8 @@ fn optional_patterns_and_unwrap_are_checked() {
         "fn f(value: i32 | None) -> i32  { match (value) { bool(n) => { n }, None => { 0 } } }",
         "fn f(value: i32) -> i32  { value! }",
         "struct E {} fn f(r: (i32 | Err<E>)) -> i32  { r! }",
-        "struct A {} struct B {} fn f(o: Ptr<A> | None) -> Ptr<A | B>  { o! }",
-        "struct Span<T> { data: Ptr<T>, length: u64, } fn f(o: Span<i32> | None) -> Span<i32 | None>  { o! }",
+        "struct A {} struct B {} fn f(o: PtrMut<A> | None) -> PtrMut<A | B>  { o! }",
+        "struct SpanMut<T> { data: PtrMut<T>, length: u64, } fn f(o: SpanMut<i32> | None) -> SpanMut<i32 | None>  { o! }",
         "fn f(x: i32 | None)  { match (x) { i32(n) => {}, None => {}, None => {} } }",
         "type Both = i32 | bool; fn f(x: Both)  { match (x) { Both(v) => {} } }",
     ] {

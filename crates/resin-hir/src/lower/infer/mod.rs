@@ -41,7 +41,9 @@ pub(crate) enum Head {
     Nominal {
         definition: TypeId,
     },
-    Pointer,
+    Pointer {
+        mutable: bool,
+    },
     Reference {
         mutable: bool,
     },
@@ -78,7 +80,7 @@ impl Type {
     /// The symbolic counterpart of `Ty::deref_target` for primitive pointers.
     pub fn deref_target(&self) -> Option<&Type> {
         match self {
-            Self::Node(Head::Pointer, children) => children.first(),
+            Self::Node(Head::Pointer { .. }, children) => children.first(),
             _ => None,
         }
     }
@@ -106,8 +108,8 @@ impl Type {
     pub fn value(of: Type) -> Self {
         Self::Node(Head::Value, vec![of])
     }
-    pub fn pointer(pointee: Type) -> Self {
-        Self::Node(Head::Pointer, vec![pointee])
+    pub fn pointer(pointee: Type, mutable: bool) -> Self {
+        Self::Node(Head::Pointer { mutable }, vec![pointee])
     }
 
     pub fn function(params: Vec<Type>, result: Type) -> Self {
@@ -206,9 +208,10 @@ impl Type {
                 Self::borrow(Self::from_hir(referent), *mutable)
             }
             crate::Type::Value { of } => Self::value(Self::from_hir(of)),
-            crate::Type::Pointer { pointee } => {
-                Self::Node(Head::Pointer, vec![Self::from_hir(pointee)])
-            }
+            crate::Type::Pointer { pointee, mutable } => Self::Node(
+                Head::Pointer { mutable: *mutable },
+                vec![Self::from_hir(pointee)],
+            ),
             crate::Type::Function { params, result } => Self::function(
                 params.iter().map(Self::from_hir).collect(),
                 Self::from_hir(result),
@@ -245,7 +248,7 @@ impl Type {
 impl From<Ty> for Type {
     fn from(ty: Ty) -> Self {
         match ty {
-            Ty::Pointer { pointee } => Self::pointer((*pointee).into()),
+            Ty::Pointer { pointee, mutable } => Self::pointer((*pointee).into(), mutable),
             Ty::Reference { referent, mutable } => Self::borrow((*referent).into(), mutable),
             Ty::Array { element, length } => {
                 Self::Node(Head::Array(length), vec![(*element).into()])
@@ -299,7 +302,8 @@ impl Head {
             },
             Self::Atom(ty) => ty.clone(),
             Self::Union => Ty::union_of(children),
-            Self::Pointer => Ty::Pointer {
+            Self::Pointer { mutable } => Ty::Pointer {
+                mutable: *mutable,
                 pointee: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => Ty::Array {
@@ -412,7 +416,8 @@ impl Head {
             Self::Value => crate::Type::Value {
                 of: Box::new(children.next().unwrap()),
             },
-            Self::Pointer => crate::Type::Pointer {
+            Self::Pointer { mutable } => crate::Type::Pointer {
+                mutable: *mutable,
                 pointee: Box::new(children.next().unwrap()),
             },
             Self::Array(length) => crate::Type::Array {
@@ -729,6 +734,10 @@ impl Solver {
             return Ok(true);
         }
         match (self.head(from), self.head(to)) {
+            (
+                Type::Node(Head::Pointer { mutable: true }, a),
+                Type::Node(Head::Pointer { mutable: false }, b),
+            ) => self.unify(&a[0], &b[0], span),
             (Type::Node(Head::Record(a), aa), Type::Node(Head::Record(b), bb)) if a == b => {
                 let mut complete = true;
                 for (from, to) in aa.iter().zip(&bb) {
@@ -1104,7 +1113,7 @@ impl Solver {
     }
 
     // Explicit pointer casts relate holes only where their pointee shapes agree.
-    // A cast from Ptr<[T; N]> to Ptr<U> must not equate the array with U.
+    // A cast from PtrMut<[T; N]> to PtrMut<U> must not equate the array with U.
     pub fn cast(&mut self, from: &Type, to: &Type, span: Span) -> Result<()> {
         match (self.head(from), self.head(to)) {
             (_, Type::Variable(_)) => self.unify(to, from, span).map(|_| ()),
@@ -1390,6 +1399,21 @@ enum OverloadMatch {
 }
 
 #[derive(Clone)]
+pub(crate) enum AddressBase {
+    Field { receiver: Type },
+    Deref { pointer: Type },
+}
+
+impl AddressBase {
+    fn ty(&self) -> &Type {
+        match self {
+            Self::Field { receiver } => receiver,
+            Self::Deref { pointer } => pointer,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(crate) enum Constraint {
     Overload {
         lookup: Overload,
@@ -1404,7 +1428,11 @@ pub(crate) enum Constraint {
     Variant(Type, Pattern, Type),
     Boolean(Type),
     Deref(Type, Type),
-    Address(Type, Type),
+    Address {
+        pointee: Type,
+        bases: Vec<AddressBase>,
+        result: Type,
+    },
     Field(Type, Arc<str>, Type),
     Call(Type, Vec<Type>, Type),
     MethodReference {
@@ -1927,7 +1955,7 @@ impl Inference<'_> {
         }
         // Nominal receivers cannot acquire a builtin indexing operation when
         // their type arguments specialize. A sole source overload can determine
-        // its result now, including the pointer returned by Span<T>:lea.
+        // its result now, including the pointer returned by SpanMut<T>:lea.
         let nominal_receiver = args.and_then(|args| args.first()).is_some_and(|arg| {
             let receiver = self.solver.head(&Type::value(arg.clone()));
             matches!(
@@ -1950,7 +1978,7 @@ impl Inference<'_> {
                 })
         {
             // A single compatible generic signature already determines its
-            // result's shape. Retain that information (for example Ptr<T>)
+            // result's shape. Retain that information (for example PtrMut<T>)
             // instead of hiding it behind a dependent operation projection.
             let baseline = self.solver.clone();
             if let Ok(application) = self.match_overload(candidate, lookup, span) {
@@ -2457,8 +2485,36 @@ impl Inference<'_> {
                     .map_err(|e| GenerateError::typing(span, e))?;
             }
 
-            Constraint::Address(pointee, out) => {
-                let pointer = Type::pointer(pointee.clone());
+            Constraint::Address {
+                pointee,
+                bases,
+                result: out,
+            } => {
+                let mut mutable = true;
+                for base in bases {
+                    let mut receiver = Type::value(base.ty().clone());
+                    let mut access = None;
+                    loop {
+                        match self.solver.head(&receiver) {
+                            Type::Node(Head::Pointer { mutable }, args) => {
+                                access = Some(mutable);
+                                if matches!(base, AddressBase::Deref { .. }) {
+                                    break;
+                                }
+                                // Field access follows every pointer in its receiver;
+                                // the innermost pointer supplies the field's permission.
+                                receiver = args[0].clone();
+                            }
+                            Type::Variable(_) | Type::Apply { .. } => return Ok(false),
+                            _ => break,
+                        }
+                    }
+                    if let Some(access) = access {
+                        mutable = access;
+                        break;
+                    }
+                }
+                let pointer = Type::pointer(pointee.clone(), mutable);
                 if !self.solver.unify(out, &pointer, span)? {
                     return Ok(false);
                 }
@@ -2479,7 +2535,7 @@ impl Inference<'_> {
                 let shape = self.shape(input, true, span)?;
                 if let Some(element) = shape.view_element() {
                     let ty = match name.as_ref() {
-                        "data" => Type::pointer(element),
+                        "data" => Type::pointer(element, false),
                         "length" => Ty::UInt64.into(),
                         _ => return Err(error(span, "unknown string or span field")),
                     };
@@ -2643,9 +2699,10 @@ impl Inference<'_> {
                                 return Ok(false);
                             }
                         }
-                        (Type::Node(Head::Pointer, _), Type::Node(Head::Pointer, _)) => {
-                            self.solver.cast(from, to, span)?
-                        }
+                        (
+                            Type::Node(Head::Pointer { .. }, _),
+                            Type::Node(Head::Pointer { .. }, _),
+                        ) => self.solver.cast(from, to, span)?,
                         _ => {}
                     }
                     return Ok(
@@ -2748,7 +2805,9 @@ impl Constraint {
             } => std::iter::once(receiver)
                 .chain(type_args.iter().flatten())
                 .collect(),
-            Self::Address(pointee, _) => vec![pointee],
+            Self::Address { pointee, bases, .. } => std::iter::once(pointee)
+                .chain(bases.iter().map(AddressBase::ty))
+                .collect(),
             Self::Record(fields, _) => fields.iter().map(|(_, ty)| ty).collect(),
             Self::Builtin(_, args, _) => args.iter().collect(),
         }

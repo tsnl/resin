@@ -15,6 +15,7 @@ fn nominal_nonrecords_are_rejected_at_creation_and_verification() {
         Ty::Bool,
         Ty::Int32,
         Ty::Pointer {
+            mutable: true,
             pointee: Box::new(Ty::Int32),
         },
         Ty::Function {
@@ -65,6 +66,7 @@ fn inline_dependencies_require_completion_but_indirect_fields_can_be_pending() {
         .define_type(
             second,
             record(Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(first_ty),
             }),
         )

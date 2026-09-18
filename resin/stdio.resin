@@ -18,8 +18,8 @@ extern {
 		fn resin_stdout_flush() -> i32;
 	},
 	"stdlib.h": {
-		fn realloc(memory: Ptr<u8>, bytes: u64) -> Ptr<u8>;
-		fn free(memory: Ptr<u8>);
+		fn realloc(memory: PtrMut<u8>, bytes: u64) -> PtrMut<u8>;
+		fn free(memory: PtrMut<u8>);
 	},
 };
 
@@ -97,7 +97,7 @@ const carriage_return: u8 = 13;
 
 // Owns length bytes followed by a NUL. The final shared owner frees the allocation.
 struct InputLineOwner {
-	data: Ptr<u8>,
+	data: PtrMut<u8>,
 	length: u64,
 }
 fn drop(self: RefMut<InputLineOwner>) {
@@ -110,7 +110,7 @@ struct InputLine {
 	owner: ArcPtr<InputLineOwner>,
 }
 fn get(self: Ref<InputLine>) -> Span<u8> {
-	let mut data = self.owner:get();
+	let data = self.owner:get();
 	Span<u8> { data = data.data, length = data.length }
 }
 
@@ -125,7 +125,7 @@ struct InputOutOfMemory {}
 struct InputWriteError {}
 type InputError = EndOfInput | InputReadError | InputOutOfMemory;
 
-fn resize_input(memory: Ptr<u8>, capacity: u64) -> (Ptr<u8> | Err<InputOutOfMemory>) {
+fn resize_input(memory: PtrMut<u8>, capacity: u64) -> (PtrMut<u8> | Err<InputOutOfMemory>) {
 	let mut resized = realloc(memory, capacity);
 	if (u64(resized) == u64(0)) {
 		Err(InputOutOfMemory {})
@@ -174,7 +174,7 @@ fn console_read_byte() -> (u8 | Err<EndOfInput | InputReadError>) {
 /// Read through LF or EOF, stripping the LF and an immediately preceding CR.
 /// The returned owner retains all other bytes and a trailing NUL outside its length.
 fn console_read_line() -> (InputLine | Err<InputError>) {
-	let mut owner = match (arc_ptr_alloc::<InputLineOwner>(InputLineOwner { data = Ptr<u8>(u64(0)), length = u64(0) })) {
+	let mut owner = match (arc_ptr_alloc::<InputLineOwner>(InputLineOwner { data = PtrMut<u8>(u64(0)), length = u64(0) })) {
 		ArcPtr<InputLineOwner>(value) => {
 			(value)
 		},
@@ -183,7 +183,7 @@ fn console_read_line() -> (InputLine | Err<InputError>) {
 		},
 	};
 	let mut storage = owner:get();
-	storage.data = resize_input(Ptr<u8>(u64(0)), initial_input_capacity)?;
+	storage.data = resize_input(PtrMut<u8>(u64(0)), initial_input_capacity)?;
 	storage.length = initial_input_capacity;
 	let mut length: u64 = 0;
 	let mut byte = getchar();
@@ -200,13 +200,13 @@ fn console_read_line() -> (InputLine | Err<InputError>) {
 			storage.data = resize_input(storage.data, capacity)?;
 			storage.length = capacity;
 		};
-		let view = Span<u8> { data = storage.data, length = storage.length };
+		let view = SpanMut<u8> { data = storage.data, length = storage.length };
 		view:at_mut(length) = resin_console_byte(byte);
 		length = length + u64(1);
 		byte = getchar();
 	};
 	check_input_end(byte, length)?;
-	let view = Span<u8> { data = storage.data, length = storage.length };
+	let view = SpanMut<u8> { data = storage.data, length = storage.length };
 	if (byte == line_feed && length > u64(0)) {
 		if (view:at(length - u64(1)) == carriage_return) {
 			length = length - u64(1);

@@ -96,7 +96,7 @@ fn generic_struct_declaration_and_application_errors_are_source_errors() {
 
 #[test]
 fn nested_generic_aliases_expand_to_the_original_nominal_declaration() {
-    let module = compile("struct Cell<T> { value: T, } type Renamed<U> = Cell<U>; type Nested<V> = Renamed<Ptr<V>>; fn take(value: Nested<i32>) -> Cell<Ptr<i32>>  { value }").unwrap();
+    let module = compile("struct Cell<T> { value: T, } type Renamed<U> = Cell<U>; type Nested<V> = Renamed<PtrMut<V>>; fn take(value: Nested<i32>) -> Cell<PtrMut<i32>>  { value }").unwrap();
     let function = &module.functions[0];
     assert_eq!(
         function.signature.params[0].annotation.ty,
@@ -108,6 +108,7 @@ fn nested_generic_aliases_expand_to_the_original_nominal_declaration() {
     assert_eq!(
         arguments,
         &[Type::Pointer {
+            mutable: true,
             pointee: Box::new(Type::Int32)
         }]
     );

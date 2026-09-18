@@ -8,7 +8,8 @@ Neither permits taking the referent's address with `&`.
 | --- | --- | --- | --- |
 | `Ref<T>` | Yes | No | No |
 | `RefMut<T>` | Yes | Yes | No |
-| `Ptr<T>` | Yes | Yes | Already a pointer |
+| `Ptr<T>` | Yes | No | Already a pointer |
+| `PtrMut<T>` | Yes | Yes | Already a pointer |
 
 A `RefMut<T>` may weaken to `Ref<T>` at a call, binding, or return. A `Ref<T>`
 never strengthens to `RefMut<T>`. Both reference kinds are aliasable; writable
@@ -21,7 +22,7 @@ to transfer a value from explicitly addressable storage.
 ```resin
 import { "$/span.resin", "$/shared.resin" };
 
-fn first_mut<T>(items: Ref<Span<T>>) -> RefMut<T> {
+fn first_mut<T>(items: Ref<SpanMut<T>>) -> RefMut<T> {
 	items:at_mut(u64(0))
 }
 fn increment(value: RefMut<i32>) {
@@ -30,7 +31,7 @@ fn increment(value: RefMut<i32>) {
 
 fn example() -> i32 | Err<_> {
 	let items = arc_ptr_alloc([i32(10), i32(20)])?;
-	let view = Span<i32> { data = items:get():lea(u64(0)), length = u64(2) };
+	let view = SpanMut<i32> { data = items:get():lea(u64(0)), length = u64(2) };
 	let reference: RefMut<i32> = first_mut(view);
 	increment(reference);
 	first_mut(view) = 42;
@@ -115,18 +116,37 @@ Use `ArcPtr<T>` or `ArcSpan<T>` when a value must retain shared ownership. Copyi
 from an Arc still does not retain it; keep an owning handle alive during access.
 Atomic reference counts do not synchronize writes to the payload.
 
-`Ptr<T>` is an ordinary copyable pointer. `pointer.*` accesses its pointee and
-`&pointer.field` obtains a pointer to a field of that pointee. Local values, their
-inline fields, and `Ref` bindings cannot have their addresses taken. A `Ref`
-parameter or result keeps this restriction even when its referent came from a
-pointer. Functions that expose an address must accept or return `Ptr<T>` explicitly.
-Reading a pointer through a reference and dereferencing it still accesses
-addressable storage; `Ref<Ptr<T>>` does not remove the stored pointer’s capability.
-`Ref<Ptr<T>>` permits reading a stored pointer and writing through it, but cannot
-replace the pointer slot itself. `RefMut<Ptr<T>>` can also replace that slot.
-Read-only permissions apply to the referent itself, not transitively to separately
-pointed-to storage. Likewise, `Span<T>:at_mut()` reads the span descriptor through
-`Ref<Span<T>>` and returns writable access through its stored `Ptr<T>`.
+`Ptr<T>` is an ordinary copyable read-only pointer; `PtrMut<T>` grants write
+permission. `pointer.*` accesses its pointee, and `&pointer.field` preserves the
+pointer's permission when addressing a field. A `PtrMut<T>` can weaken to `Ptr<T>`
+at a call, binding, or return. Pointee types remain invariant: this does not convert
+`PtrMut<PtrMut<T>>` into `Ptr<Ptr<T>>`.
+
+Local values, inline local fields, and either reference kind cannot have their
+addresses taken. A reference parameter or result keeps this restriction even when
+its referent came from a pointer. No implicit reference-to-pointer conversion exists.
+
+Permission belongs to each access, separately from binding mutability.
+`let p: PtrMut<T>` can write its pointee; `let mut p: Ptr<T>` can replace the pointer
+binding but cannot write its pointee. `Ref<PtrMut<T>>` can read the stored writable
+pointer and write through it, but cannot replace the pointer slot. Similarly,
+`Ptr<PtrMut<T>>` cannot replace its first pointee, although the inner pointer can
+write its own pointee. This is aliasable access, not a borrow checker.
+
+| View | Read-only | Writable |
+| --- | --- | --- |
+| Borrowed pointer | `Ptr<T>` | `PtrMut<T>` |
+| Borrowed sequence | `Span<T>` | `SpanMut<T>` |
+| Retained GPU pointer | `GpuPtr<T>` | `GpuPtrMut<T>` |
+| Retained GPU sequence | `GpuSpan<T>` | `GpuSpanMut<T>` |
+
+The span and GPU families are ordinary source structs. Their `:read_only()` method
+explicitly weakens a writable view; there is no implicit conversion between nominal
+view structs. Slicing and `:lea()` preserve access. Host shared owners' `:get()`
+returns `PtrMut` or `SpanMut`; copying these borrowed views does not retain the owner.
+Raw pointer/integer casts and foreign declarations remain low-level unchecked
+boundaries, not a memory-safety guarantee. A direct cast cannot strengthen a `Ptr`
+into `PtrMut`.
 
 ## References do not grant pointers
 
@@ -152,24 +172,25 @@ pointer value through `Ref<Ptr<T>>` is allowed; that reads the stored capability
 
 ## Indexing and representation
 
-Arrays, `Span<T>`, and `str` support `items:at(index)` returning `Ref<T>` (or
+Arrays, both span kinds, and `str` support `items:at(index)` returning `Ref<T>` (or
 `Ref<u8>` for `str`). The index is `u64`; receivers and indices evaluate once.
-`:at_mut(index)` returns `RefMut<T>` for writable array access and spans.
+`:at_mut(index)` returns `RefMut<T>` for writable array access and `SpanMut<T>`.
 An inline array needs a writable place; a read-only array reference cannot call
 `at_mut`. String literals have no `at_mut`. Use `items:at_mut(i) = value` to write. `:lea(i)` returns an element pointer for
-pointers to arrays, `Span<T>`, and `str`; it is unavailable on local array values
+pointers to arrays, both span kinds, and `str`; it is unavailable on local array values
 and references to arrays. Thus an allocated array can produce pointers without
 allowing an inline local array to expose its address. These methods check host
 indices before producing a result.
 Host bounds diagnostics and unchecked shader indexing retain their existing rules.
 The low-level `pointer_index` intrinsic returns a pointer. `ArcPtr<T>:get()` also
-returns a pointer. Host `GpuSpan<T>:at()` returns an owning `GpuPtr<T>` supporting
-`load`, `store`, and `replace`.
+returns a pointer. Host `GpuSpan<T>:at()` returns `GpuPtr<T>`; `GpuSpanMut<T>:at()` returns
+`GpuPtrMut<T>`. Both can load; only the mutable pointer can store or replace.
+String literal bytes and process argument/environment snapshots expose read-only pointers.
 
 HIR, specialization, and LIR retain reference permissions separately from pointer
 capabilities. `LocalRef` borrows local storage as `RefMut`; HIR checks whether a
-source binding permits that access. `Borrow` turns an existing pointer into
-`RefMut`. `ReadOnly` weakens a writable reference. There are no reverse operations. Loads, stores, and projections preserve
+source binding permits that access. `Borrow` preserves a pointer’s permission in the resulting reference.
+`ReadOnly` weakens a writable reference or pointer. There are no reverse operations. Loads, stores, and projections preserve
 these capabilities, and verification rejects references passed or returned as
 pointers, pointer casts of references, and pointer-only indexing on references.
 C emission uses pointer representations for references without granting Resin

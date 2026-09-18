@@ -30,6 +30,7 @@ fn shader(parameter: Ty, instructions: Vec<Instr>) -> Module {
 #[test]
 fn opaque_addresses_do_not_authorize_copying_managed_payloads() {
     let parameter = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::StrongOwner),
     };
     let mut instructions = vec![
@@ -76,6 +77,7 @@ fn discarded_unsupported_literals_cannot_bypass_profile_certification() {
 #[test]
 fn pointer_reinterpretation_is_host_only_even_for_direct_lir_clients() {
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::UInt32),
     };
     for (from, to) in [
@@ -84,6 +86,7 @@ fn pointer_reinterpretation_is_host_only_even_for_direct_lir_clients() {
         (
             pointer,
             Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::UInt8),
             },
         ),

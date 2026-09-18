@@ -77,7 +77,7 @@ fn declaration(index: usize, parameters: Vec<Ty>, result: Ty) -> Function {
 }
 
 fn fixture() -> Module {
-    let bytes = Ty::byte_span();
+    let bytes = Ty::byte_span(false);
     let pointer = Ty::GpuView;
     let mut module = Module {
         types: vec![pipeline_definition(
@@ -93,6 +93,7 @@ fn fixture() -> Module {
                 vec![
                     Ty::UInt64,
                     Ty::Pointer {
+                        mutable: true,
                         pointee: Box::new(Ty::UInt32),
                     },
                 ],

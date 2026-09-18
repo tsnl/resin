@@ -5,12 +5,12 @@ import { "$/span.resin", "$/string.resin", "$/stdio.resin", "$/gpu.resin", "$/sh
 struct HostRoot {
 	width: u32,
 	height: u32,
-	pixels: GpuSpan<u32>,
+	pixels: GpuSpanMut<u32>,
 }
 struct Root {
 	width: u32,
 	height: u32,
-	pixels: Span<u32>,
+	pixels: SpanMut<u32>,
 }
 
 fn pixel(index: u32) -> u32 {
@@ -18,7 +18,7 @@ fn pixel(index: u32) -> u32 {
 }
 
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(index: u64, root: PtrMut<Root>) {
 	if (index < u64(root.width) * u64(root.height) && index < root.pixels.length) {
 		root.pixels:at_mut(index) = pixel(u32(index));
 	};
@@ -46,7 +46,7 @@ fn main() -> (() | Err<_>) {
 	pixels:copy_to(host:get());
 	let view = host:get();
 	let bytes = view:as_bytes();
-	image_data_write_pixels(path.data, width, height, 4, bytes, 0)?;
+	image_data_write_pixels(path.data, width, height, 4, bytes:read_only(), 0)?;
 	print("wrote gradient.png\n");
 	(())
 }

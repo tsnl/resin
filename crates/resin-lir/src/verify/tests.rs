@@ -411,6 +411,7 @@ fn builtin_results_are_derived_from_the_operation() {
 #[test]
 fn builtin_pointer_comparison_is_valid_but_arithmetic_is_not() {
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::Int32),
     };
     verify(&builtin_module(
@@ -449,6 +450,7 @@ fn ascription_cannot_stand_in_for_cast_or_widen_instructions() {
         (
             Ty::UInt64,
             Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::Int32),
             },
         ),
@@ -620,12 +622,20 @@ fn string_immediates_have_a_distinct_type() {
         },
     };
     verify(&expression_module(Ty::Unit, Ty::Str, vec![literal.clone()])).unwrap();
-    assert!(verify(&expression_module(Ty::Unit, Ty::byte_span(), vec![literal])).is_err());
+    assert!(
+        verify(&expression_module(
+            Ty::Unit,
+            Ty::byte_span(false),
+            vec![literal]
+        ))
+        .is_err()
+    );
 }
 
 #[test]
 fn string_views_preserve_fields_and_byte_indexing() {
     let pointer = Ty::Pointer {
+        mutable: false,
         pointee: Box::new(Ty::UInt8),
     };
     for (instruction, result) in [
@@ -653,7 +663,7 @@ fn string_views_preserve_fields_and_byte_indexing() {
 
 #[test]
 fn byte_views_cannot_be_ascribed_as_strings() {
-    for source in [Ty::byte_span(), Ty::Str.view_record().unwrap()] {
+    for source in [Ty::byte_span(false), Ty::Str.view_record().unwrap()] {
         let module = parameter_expression(
             source.clone(),
             Ty::Str,
@@ -722,6 +732,7 @@ fn local_references_cannot_be_retyped_returned_or_passed_as_pointers() {
         referent: Box::new(Ty::Int32),
     };
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::Int32),
     };
     let function = |result: Ty, instrs| Function {

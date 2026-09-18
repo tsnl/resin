@@ -91,7 +91,7 @@ fn zero_and_multiple_argument_calls_have_distinct_parameter_counts() {
 #[test]
 fn function_types_accept_unit_tuples_and_higher_order_calls() {
     compile(
-        "struct Span<T> { data: Ptr<T>, length: u64, } type P = Ptr<()>; type S = Span<(i32, i32)>; fn f (p: P) -> P  { p }",
+        "struct SpanMut<T> { data: PtrMut<T>, length: u64, } type P = PtrMut<()>; type S = SpanMut<(i32, i32)>; fn f (p: P) -> P  { p }",
     );
     compile(
         "export { main }; type F = () -> i32; fn one () -> i32  { 1 } fn main() -> ()  { let mut f = F(one); let mut x = f(); }",
@@ -121,12 +121,14 @@ fn function_types_accept_unit_tuples_and_higher_order_calls() {
 #[test]
 fn type_formers_take_types_between_angle_brackets() {
     let m = compile(
-        "export { main }; struct FieldsValueNext<T0, T1> { value: T0, next: T1, }\nstruct Span<T> { data: Ptr<T>, length: u64, } type Pointer = Ptr<Ptr<i32>>; type View = Span<FieldsValueNext<i32, Pointer>>; type Callback = Ptr<(i32) -> i32>; type UnitPointer = Ptr<()>; fn identity(p: Pointer) -> Pointer  { p } fn main() -> ()  { let mut p = Ptr<i32>(u64(0)); }",
+        "export { main }; struct FieldsValueNext<T0, T1> { value: T0, next: T1, }\nstruct SpanMut<T> { data: PtrMut<T>, length: u64, } type Pointer = PtrMut<PtrMut<i32>>; type View = SpanMut<FieldsValueNext<i32, Pointer>>; type Callback = PtrMut<(i32) -> i32>; type UnitPointer = PtrMut<()>; fn identity(p: Pointer) -> Pointer  { p } fn main() -> ()  { let mut p = PtrMut<i32>(u64(0)); }",
     );
     assert_eq!(
         m.functions[0].result,
         Ty::Pointer {
+            mutable: true,
             pointee: Box::new(Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::Int32)
             })
         }
@@ -137,9 +139,9 @@ fn type_formers_take_types_between_angle_brackets() {
     for source in [
         "type P = Ptr(i32);",
         "type P = Ptr i32;",
-        "type P = Ptr<1>;",
-        "type P = Ptr<>;",
-        "type P = Ptr<i32, i32>;",
+        "type P = PtrMut<1>;",
+        "type P = PtrMut<>;",
+        "type P = PtrMut<i32, i32>;",
     ] {
         assert!(
             !support::frontend::ast(&support::frontend::cst(source, None))
@@ -351,10 +353,10 @@ fn signed_literals_respect_context_and_the_minimum_integer() {
 #[test]
 fn returned_pointers_support_field_assignment() {
     compile(
-        "struct FieldsX<T0> { x: T0, }\nfn id (p: Ptr<FieldsX<i32>>) -> Ptr<FieldsX<i32>>  { p } fn f (p: Ptr<FieldsX<i32>>) { id(p).x = 1 }",
+        "struct FieldsX<T0> { x: T0, }\nfn id (p: PtrMut<FieldsX<i32>>) -> PtrMut<FieldsX<i32>>  { p } fn f (p: PtrMut<FieldsX<i32>>) { id(p).x = 1 }",
     );
     compile(
-        "struct FieldsX<T0> { x: T0, }\nstruct R { inner: FieldsX<i32>, } fn id (p: Ptr<R>) -> Ptr<R>  { p } fn f (p: Ptr<R>) { id(p).inner.x = 1 }",
+        "struct FieldsX<T0> { x: T0, }\nstruct R { inner: FieldsX<i32>, } fn id (p: PtrMut<R>) -> PtrMut<R>  { p } fn f (p: PtrMut<R>) { id(p).inner.x = 1 }",
     );
     let src = "struct FieldsX<T0> { x: T0, }\nfn id (r: FieldsX<i32>) -> FieldsX<i32>  { r } fn f (r: FieldsX<i32>) { id(r).x = 1 }";
     assert!(matches!(
@@ -367,7 +369,7 @@ fn returned_pointers_support_field_assignment() {
 fn nested_field_access_evaluates_its_base_once() {
     for src in [
         "struct FieldsInner<T0> { inner: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsInner<FieldsX<i32>>) -> FieldsInner<FieldsX<i32>>  { r } fn f (r: FieldsInner<FieldsX<i32>>) -> i32  { id(r).inner.x }",
-        "struct FieldsP<T0> { p: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsP<Ptr<FieldsX<i32>>>) -> FieldsP<Ptr<FieldsX<i32>>>  { r } fn f (r: FieldsP<Ptr<FieldsX<i32>>>) { id(r).p.x = 1 }",
+        "struct FieldsP<T0> { p: T0, }\nstruct FieldsX<T0> { x: T0, }\nfn id (r: FieldsP<PtrMut<FieldsX<i32>>>) -> FieldsP<PtrMut<FieldsX<i32>>>  { r } fn f (r: FieldsP<PtrMut<FieldsX<i32>>>) { id(r).p.x = 1 }",
     ] {
         let module = compile(src);
         let f = module

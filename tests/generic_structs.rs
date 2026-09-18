@@ -37,7 +37,7 @@ fn pointers_to_generic_records_preserve_field_places() {
 import { "$/shared.resin" };
 
         struct Cell<T> { value: T, }
-        fn replace<T>(cell: Ptr<Cell<T>>, value: T) -> T  {
+        fn replace<T>(cell: PtrMut<Cell<T>>, value: T) -> T  {
             let mut previous = cell.value;
             cell.value = value;
             previous
@@ -105,8 +105,8 @@ fn array_and_span_index_calls_preserve_generic_field_places() {
         }
         fn main() -> i32 | Err<_> {
             let cells_owner = arc_ptr_alloc([Cell<i32> { value = 7 }, Cell<i32> { value = 35 }])?; let cells: RefMut<_> = cells_owner:get().*;
-            let mut view = Span<Cell<i32>> {
-                data = Ptr<Cell<i32>>(cells_owner:get()), length = 2
+            let mut view = SpanMut<Cell<i32>> {
+                data = PtrMut<Cell<i32>>(cells_owner:get()), length = 2
             };
             cells:at_mut(u64(0)).value = copy_through_array(cells(u64(0)).value) + view:at(u64(1)).value;
             cells(u64(0)).value
@@ -125,10 +125,10 @@ fn recursive_generic_pointers_reuse_their_concrete_identity() {
     let output = run(r#"export { main };
 import { "$/shared.resin" };
 
-        struct Node<T> { value: T, next: Ptr<Node<T>>, }
-        fn read<T>(node: Ptr<Node<T>>) -> T  { node.value }
+        struct Node<T> { value: T, next: PtrMut<Node<T>>, }
+        fn read<T>(node: PtrMut<Node<T>>) -> T  { node.value }
         fn main() -> i32 | Err<_> {
-            let tail_owner = arc_ptr_alloc(Node<i32> { value = 35, next = Ptr<Node<i32>>(u64(0)) })?; let tail: Ref<_> = tail_owner:get().*;
+            let tail_owner = arc_ptr_alloc(Node<i32> { value = 35, next = PtrMut<Node<i32>>(u64(0)) })?; let tail: Ref<_> = tail_owner:get().*;
             let head_owner = arc_ptr_alloc(Node<i32> { value = 7, next = tail_owner:get() })?; let head: Ref<_> = head_owner:get().*;
             read(head_owner:get()) + read(head.next)
         }
@@ -169,8 +169,8 @@ fn shader_fields_specialize_generic_nominal_storage() {
     let module = support::module(
         r#"export { kernel };
         struct Cell<T> { value: T, }
-        fn increment<T>(cell: Ptr<Cell<T>>)  { cell.value = cell.value + 1; }
-        @compute_shader fn kernel(index: u64, root: Ptr<Cell<u32>>)  {
+        fn increment<T>(cell: PtrMut<Cell<T>>)  { cell.value = cell.value + 1; }
+        @compute_shader fn kernel(index: u64, root: PtrMut<Cell<u32>>)  {
             increment(root);
         }
     "#,
@@ -312,7 +312,7 @@ fn optional_generic_structs_preserve_the_payload_after_unwrapping() {
 fn nongeneric_wrappers_copy_shared_generic_storage_and_destroy_it_once() {
     let output = run(r#"export { main };
         import { "$/shared.resin" };
-        struct Resource { trace: Ptr<i32>, answer: i32,
+        struct Resource { trace: PtrMut<i32>, answer: i32,
             
         }
 fn drop(self: RefMut<Resource>)  { if (self.answer != 0) { self.trace.* = self.trace.* + 1; }; }
@@ -349,11 +349,11 @@ fn foreign_pointer_signatures_keep_generic_pointees() {
 
         extern {
             "stdlib.h": {
-                fn free(value: Ptr<Cell<i32>>);
+                fn free(value: PtrMut<Cell<i32>>);
             },
         };
         struct Cell<T> { value: T, }
-        fn main() -> i32  { free(Ptr<Cell<i32>>(u64(0))); 42 }"#);
+        fn main() -> i32  { free(PtrMut<Cell<i32>>(u64(0))); 42 }"#);
     assert_eq!(
         output.status.code(),
         Some(42),

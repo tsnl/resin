@@ -7,6 +7,7 @@ use resin_types::{LocalId, Ty};
 
 fn pointer(element: Ty) -> Ty {
     Ty::Pointer {
+        mutable: true,
         pointee: Box::new(element),
     }
 }
@@ -71,7 +72,7 @@ fn indexing_and_ranges_require_a_pointer_and_unsigned_bounds() {
 fn byte_views_require_numeric_elements_and_an_unsigned_count() {
     for element in [Ty::UInt8, Ty::Int32, Ty::UInt64, Ty::Float64] {
         let params = [pointer(element), Ty::UInt64];
-        VerifiedModule::new(module(&params, Ty::byte_span(), Instr::PointerBytes)).unwrap();
+        VerifiedModule::new(module(&params, Ty::byte_span(true), Instr::PointerBytes)).unwrap();
     }
     for params in [
         [Ty::UInt64, Ty::UInt64],
@@ -80,7 +81,7 @@ fn byte_views_require_numeric_elements_and_an_unsigned_count() {
         [pointer(Ty::UInt32), Ty::Int32],
     ] {
         assert!(
-            VerifiedModule::new(module(&params, Ty::byte_span(), Instr::PointerBytes)).is_err()
+            VerifiedModule::new(module(&params, Ty::byte_span(true), Instr::PointerBytes)).is_err()
         );
     }
 }
@@ -90,7 +91,7 @@ fn byte_and_range_checks_stay_host_only_while_pointer_indexing_is_shader_legal()
     for (operation, bounds, result, accepted) in [
         (Instr::PointerIndex, 2, pointer(Ty::UInt32), true),
         (Instr::PointerRange, 3, pointer(Ty::UInt32), false),
-        (Instr::PointerBytes, 1, Ty::byte_span(), false),
+        (Instr::PointerBytes, 1, Ty::byte_span(true), false),
     ] {
         let mut params = vec![pointer(Ty::UInt32)];
         params.extend(vec![Ty::UInt64; bounds]);
@@ -117,4 +118,48 @@ fn pointer_steps_require_a_sized_element_representation() {
             VerifyErrorKind::OpaqueValue { ty: opaque.clone() }
         );
     }
+}
+
+#[test]
+fn readonly_pointers_cannot_gain_write_permission_in_verified_lir() {
+    let writable = pointer(Ty::Int32);
+    let readonly = writable.read_only().unwrap();
+    let reference = Ty::Reference {
+        mutable: false,
+        referent: Box::new(Ty::Int32),
+    };
+    VerifiedModule::new(module(
+        std::slice::from_ref(&readonly),
+        reference,
+        Instr::Borrow,
+    ))
+    .unwrap();
+    VerifiedModule::new(module(
+        std::slice::from_ref(&writable),
+        readonly.clone(),
+        Instr::ReadOnly,
+    ))
+    .unwrap();
+    for operation in [Instr::Store, Instr::Replace] {
+        assert!(
+            VerifiedModule::new(module(&[readonly.clone(), Ty::Int32], Ty::Unit, operation))
+                .is_err()
+        );
+    }
+    assert!(
+        VerifiedModule::new(module(
+            &[readonly.clone(), Ty::UInt64, Ty::UInt64],
+            writable.clone(),
+            Instr::PointerIndex
+        ))
+        .is_err()
+    );
+    assert!(
+        VerifiedModule::new(module(
+            &[readonly],
+            writable.clone(),
+            Instr::PointerCast { ty: writable }
+        ))
+        .is_err()
+    );
 }

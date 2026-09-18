@@ -137,22 +137,22 @@ fn dependent_receiver_adaptation_preserves_mutation_and_evaluation_order() {
             
             
         }
-fn add(self: Ptr<Counter>, amount: i32) -> i32  {
+fn add(self: PtrMut<Counter>, amount: i32) -> i32  {
                 self.value = self.value + amount;
                 self.value
             }
 
-fn read(self: Ptr<Counter>) -> i32  { self.value }
+fn read(self: PtrMut<Counter>) -> i32  { self.value }
 
-        fn receiver<T>(trace: Ptr<i32>, value: T) -> T  {
+        fn receiver<T>(trace: PtrMut<i32>, value: T) -> T  {
             trace.* = trace.* * 10 + 1;
             value
         }
-        fn argument(trace: Ptr<i32>) -> i32  { trace.* = trace.* * 10 + 2; 5 }
-        fn add<T>(trace: Ptr<i32>, value: T) -> _  {
+        fn argument(trace: PtrMut<i32>) -> i32  { trace.* = trace.* * 10 + 2; 5 }
+        fn add<T>(trace: PtrMut<i32>, value: T) -> _  {
             receiver(trace, value):add(argument(trace))
         }
-        fn add_owned<T>(trace: Ptr<i32>, value: T) -> _  {
+        fn add_owned<T>(trace: PtrMut<i32>, value: T) -> _  {
             let owner = receiver(trace, value);
             owner:get():add(argument(trace))
         }
@@ -304,10 +304,10 @@ fn dependent_method_calls_obey_shader_profile_rules() {
         struct Owner { value: i32,
             
         }
-fn read(self: Ptr<Owner>) -> i32  { abs(self.value) }
+fn read(self: PtrMut<Owner>) -> i32  { abs(self.value) }
 
         fn relay_read<T>(value: T) -> _  { value:read() }
-        @compute_shader fn kernel(index: u64, root: Ptr<Owner>)  {
+        @compute_shader fn kernel(index: u64, root: PtrMut<Owner>)  {
             root.value = relay_read(root);
         }"#,
     );

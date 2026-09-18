@@ -355,8 +355,7 @@ impl ReceiverConversion {
     pub(crate) fn between(from: &Ty, to: &Ty) -> Option<Self> {
         if from == to {
             Some(Self::Value)
-        } else if matches!((from, to), (Ty::Reference { mutable: true, referent: a }, Ty::Reference { mutable: false, referent: b }) if a == b)
-        {
+        } else if from.read_only().as_ref() == Some(to) {
             Some(Self::ReadOnly)
         } else if matches!(to, Ty::Reference { referent, .. } if referent.as_ref() == from) {
             Some(Self::Borrow)
@@ -414,9 +413,10 @@ pub(crate) fn intrinsic_methods(
 ) -> Vec<(&'static str, IntrinsicMethod)> {
     use super::infer::{Head, Type};
     let receiver = solver.head(receiver);
-    let pointer_receiver = matches!(receiver, Type::Node(Head::Pointer, _));
+    let pointer_receiver = matches!(receiver, Type::Node(Head::Pointer { .. }, _));
+    let pointer_mutable = matches!(receiver, Type::Node(Head::Pointer { mutable: true }, _));
     let mut methods = Vec::new();
-    if let Type::Node(Head::Pointer, parts) = &receiver {
+    if let Type::Node(Head::Pointer { mutable: true }, parts) = &receiver {
         methods.push((
             "replace",
             IntrinsicMethod {
@@ -427,7 +427,7 @@ pub(crate) fn intrinsic_methods(
         ));
     }
     let mut base = match receiver {
-        Type::Node(Head::Pointer, parts) => solver.head(&parts[0]),
+        Type::Node(Head::Pointer { .. }, parts) => solver.head(&parts[0]),
         receiver => receiver,
     };
     if matches!(base, Type::Node(Head::Atom(Ty::GpuArguments), _)) {
@@ -438,7 +438,7 @@ pub(crate) fn intrinsic_methods(
                     op: Intrinsic::GpuArgumentsTraceRays,
                     params: vec![
                         base.clone(),
-                        Type::pointer(Ty::UInt8.into()),
+                        Type::pointer(Ty::UInt8.into(), true),
                         Ty::UInt32.into(),
                         Ty::UInt32.into(),
                         Ty::UInt32.into(),
@@ -452,7 +452,7 @@ pub(crate) fn intrinsic_methods(
                     op: Intrinsic::GpuArgumentsDispatch,
                     params: vec![
                         base.clone(),
-                        Type::pointer(Ty::UInt8.into()),
+                        Type::pointer(Ty::UInt8.into(), true),
                         Ty::UInt32.into(),
                         Ty::UInt32.into(),
                         Ty::UInt32.into(),
@@ -466,7 +466,7 @@ pub(crate) fn intrinsic_methods(
                     op: Intrinsic::GpuArgumentsDraw,
                     params: vec![
                         base.clone(),
-                        Type::pointer(Ty::UInt8.into()),
+                        Type::pointer(Ty::UInt8.into(), true),
                         Ty::UInt32.into(),
                     ],
                     result: Ty::Int32.into(),
@@ -474,13 +474,13 @@ pub(crate) fn intrinsic_methods(
             ),
         ]);
     }
-    while let Type::Node(Head::Pointer, parts) = &base {
+    while let Type::Node(Head::Pointer { .. }, parts) = &base {
         base = solver.head(&parts[0]);
     }
     let index = match &base {
         Type::Node(Head::Array(_), parts) => Some((
             if pointer_receiver {
-                Type::pointer(base.clone())
+                Type::pointer(base.clone(), pointer_mutable)
             } else {
                 Type::reference(base.clone())
             },
@@ -498,7 +498,9 @@ pub(crate) fn intrinsic_methods(
                 result: Type::reference(element.clone()),
             },
         ));
-        if !matches!(base, Type::Node(Head::Atom(Ty::Str), _)) {
+        if (!pointer_receiver || pointer_mutable)
+            && !matches!(base, Type::Node(Head::Atom(Ty::Str), _))
+        {
             let mutable_receiver = if pointer_receiver {
                 receiver.clone()
             } else {
@@ -519,7 +521,7 @@ pub(crate) fn intrinsic_methods(
                 IntrinsicMethod {
                     op: Intrinsic::Index,
                     params: vec![receiver, Ty::UInt64.into()],
-                    result: Type::pointer(element),
+                    result: Type::pointer(element, pointer_mutable),
                 },
             ));
         }
@@ -533,7 +535,8 @@ pub(super) fn primitive_signature(
     parameters: &[crate::Type],
 ) -> Option<(crate::Intrinsic, Vec<crate::Type>, crate::Type)> {
     use crate::{Intrinsic, RecordField, Type};
-    let pointer = |pointee: Type| Type::Pointer {
+    let pointer = |pointee: Type, mutable| Type::Pointer {
+        mutable,
         pointee: Box::new(pointee),
     };
     let reference = |referent: Type| Type::Reference {
@@ -594,25 +597,32 @@ pub(super) fn primitive_signature(
                 super::types::ty(&operation.result()),
             )
         }
-        ("pointer_index", [element]) => (
+        ("pointer_index" | "pointer_index_mut", [element]) => (
             Intrinsic::PointerIndex,
-            vec![pointer(element.clone()), Type::UInt64, Type::UInt64],
-            pointer(element.clone()),
+            vec![
+                pointer(element.clone(), operation == "pointer_index_mut"),
+                Type::UInt64,
+                Type::UInt64,
+            ],
+            pointer(element.clone(), operation == "pointer_index_mut"),
         ),
-        ("pointer_range", [element]) => (
+        ("pointer_range" | "pointer_range_mut", [element]) => (
             Intrinsic::PointerRange,
             vec![
-                pointer(element.clone()),
+                pointer(element.clone(), operation == "pointer_range_mut"),
                 Type::UInt64,
                 Type::UInt64,
                 Type::UInt64,
             ],
-            pointer(element.clone()),
+            pointer(element.clone(), operation == "pointer_range_mut"),
         ),
-        ("pointer_bytes", [element]) => (
+        ("pointer_bytes" | "pointer_bytes_mut", [element]) => (
             Intrinsic::PointerBytes,
-            vec![pointer(element.clone()), Type::UInt64],
-            super::types::ty(&Ty::byte_span()),
+            vec![
+                pointer(element.clone(), operation == "pointer_bytes_mut"),
+                Type::UInt64,
+            ],
+            super::types::ty(&Ty::byte_span(operation == "pointer_bytes_mut")),
         ),
         ("owner_create", [element]) => (
             Intrinsic::OwnerCreate,
@@ -627,7 +637,7 @@ pub(super) fn primitive_signature(
         ("owner_data", [element]) => (
             Intrinsic::OwnerData,
             vec![reference(Type::StrongOwner)],
-            pointer(element.clone()),
+            pointer(element.clone(), true),
         ),
         ("owner_length", []) => (
             Intrinsic::OwnerLength,
@@ -646,7 +656,7 @@ pub(super) fn primitive_signature(
         ),
         ("string_from_bytes", []) => (
             Intrinsic::StringFromBytes,
-            vec![pointer(Type::UInt8), Type::UInt64],
+            vec![pointer(Type::UInt8, false), Type::UInt64],
             Type::StrongOwner,
         ),
         ("sqrt" | "sin" | "cos", [element]) => (
@@ -661,14 +671,14 @@ pub(super) fn primitive_signature(
         ("repr", [value]) => (Intrinsic::Repr, vec![value.clone()], Type::StrongOwner),
         ("format_bytes", [arguments]) => (
             Intrinsic::FormatBytes,
-            vec![pointer(Type::UInt8), Type::UInt64, arguments.clone()],
+            vec![pointer(Type::UInt8, false), Type::UInt64, arguments.clone()],
             Type::StrongOwner,
         ),
         ("weak_empty", []) => (Intrinsic::WeakEmpty, vec![], Type::WeakOwner),
         ("gpu_view_allocate", [native]) => (
             Intrinsic::GpuViewAllocate,
             vec![
-                pointer(native.clone()),
+                pointer(native.clone(), true),
                 Type::StrongOwner,
                 Type::UInt64,
                 Type::UInt64,
@@ -717,7 +727,7 @@ pub(super) fn primitive_signature(
             vec![
                 Type::GpuView,
                 Type::UInt64,
-                pointer(element.clone()),
+                pointer(element.clone(), true),
                 Type::UInt64,
             ],
             Type::Unit,
@@ -727,7 +737,7 @@ pub(super) fn primitive_signature(
             vec![
                 Type::GpuView,
                 Type::UInt64,
-                pointer(element.clone()),
+                pointer(element.clone(), false),
                 Type::UInt64,
             ],
             Type::Unit,
@@ -737,8 +747,8 @@ pub(super) fn primitive_signature(
             vec![
                 Type::GpuView,
                 Type::UInt64,
-                pointer(Type::UInt8),
-                pointer(Type::UInt8),
+                pointer(Type::UInt8, true),
+                pointer(Type::UInt8, true),
             ],
             Type::Int32,
         ),

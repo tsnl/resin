@@ -2,7 +2,7 @@ export { kernel, main };
 import { "$/shared.resin", "$/span.resin" };
 struct Root {
 	count: u32,
-	pixels: Ptr<u32>,
+	pixels: PtrMut<u32>,
 }
 struct Stop {
 	code: u32,
@@ -63,10 +63,10 @@ fn evaluate(index: u32) -> (u32 | Err<Stop>) {
 	(total + index)
 }
 @compute_shader
-fn kernel(invocation: u64, root: Ptr<Root>) {
+fn kernel(invocation: u64, root: PtrMut<Root>) {
 	let mut index = u32(invocation);
 	if (index < root.count) {
-		let mut output = Span<u32> { data = root.pixels, length = u64(root.count) };
+		let mut output = SpanMut<u32> { data = root.pixels, length = u64(root.count) };
 		fixture_index(output.data, output.length, invocation).* = match (evaluate(index)) {
 			u32(value) => {
 				value
@@ -94,4 +94,4 @@ fn main() -> i32 | Err<_> {
 	}
 }
 
-intrinsic "pointer_index" fn fixture_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_index_mut" fn fixture_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;

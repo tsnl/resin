@@ -21,7 +21,7 @@ fn mask(color: Color) -> OptionalColor {
 }
 
 @fragment_shader
-fn fragment(color: Color, fallback: Ptr<Color>) -> OptionalColor {
+fn fragment(color: Color, fallback: PtrMut<Color>) -> OptionalColor {
     let result = mask(color);
     if (color.g < 0.5) { result }
     else {

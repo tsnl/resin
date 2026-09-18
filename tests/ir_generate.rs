@@ -194,7 +194,7 @@ fn type_mismatch_is_a_type_error() {
 
 #[test]
 fn linked_list_type_is_finite_through_its_pointer() {
-    let module = compile("struct List { value: i32, next: Ptr<List>, }");
+    let module = compile("struct List { value: i32, next: PtrMut<List>, }");
     assert_eq!(
         module.types.iter().filter(|d| d.name().is_some()).count(),
         1
@@ -234,7 +234,7 @@ fn function_values_do_not_capture_local_state() {
 
 #[test]
 fn assignment_and_deref_store_through_an_address() {
-    let module = compile("fn f (p: Ptr<i32>) -> i32  { p.* = 1; p.* }");
+    let module = compile("fn f (p: PtrMut<i32>) -> i32  { p.* = 1; p.* }");
     verify(&module).unwrap();
     let function = &module.functions[0];
     assert!(function.blocks.iter().any(|block| {
@@ -297,7 +297,7 @@ fn from_meters (m: Meters) -> i32  { m.value }
 fn field_access_autoderefs_a_named_pointer() {
     let module = compile(
         r#"struct FieldsX<T0> { x: T0, }
-type P = Ptr<FieldsX<i32>>;
+type P = PtrMut<FieldsX<i32>>;
 fn f (p: P) -> i32  { p.x }
 "#,
     );
@@ -384,8 +384,8 @@ fn main() -> ()  {
 #[test]
 fn nominal_record_ascription_wraps_the_representation() {
     let module = compile(
-        r#"struct List { value: i32, next: Ptr<List>, }
-fn nil (p: Ptr<List>) -> List  { List { value = 0, next = p } }
+        r#"struct List { value: i32, next: PtrMut<List>, }
+fn nil (p: PtrMut<List>) -> List  { List { value = 0, next = p } }
 "#,
     );
     verify(&module).unwrap();
@@ -396,6 +396,7 @@ fn nil (p: Ptr<List>) -> List  { List { value = 0, next = p } }
         module.functions[0].ty().unwrap(),
         Ty::Function {
             params: vec![Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(list.clone()),
             }],
             result: Box::new(list.clone()),
@@ -434,8 +435,8 @@ fn span_and_literal_locals_are_typed() {
     let module = compile(
         r#"export { main };
 
-struct Span<T> { data: Ptr<T>, length: u64, }
-type Buf = Span<i32>;
+struct SpanMut<T> { data: PtrMut<T>, length: u64, }
+type Buf = SpanMut<i32>;
 
 fn main() -> ()  {
     let mut x = 1;
@@ -448,7 +449,21 @@ fn main() -> ()  {
     };
     assert_eq!(
         module.types[definition.index()].body(),
-        Some(&Ty::pointer_length(Ty::Int32))
+        Some(&Ty::Record {
+            fields: vec![
+                resin_types::RecordField {
+                    name: "data".into(),
+                    ty: Ty::Pointer {
+                        mutable: true,
+                        pointee: Box::new(Ty::Int32)
+                    }
+                },
+                resin_types::RecordField {
+                    name: "length".into(),
+                    ty: Ty::UInt64
+                }
+            ]
+        })
     );
     assert_eq!(module.functions[0].locals[0].ty, Ty::Int64);
 }
@@ -463,14 +478,14 @@ fn short_circuit_and_compiles() {
 #[test]
 fn pointers_cannot_be_used_in_arithmetic_and_indexing_is_explicit() {
     for body in ["p + 1", "p - 1", "p + p", "-p", "~p", "1 + p", "p(0)"] {
-        let source = format!("fn bad(p: Ptr<i32>) -> Ptr<i32>  {{ {body} }}");
+        let source = format!("fn bad(p: PtrMut<i32>) -> PtrMut<i32>  {{ {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
     for body in ["xs(0).* = 3", "xs(1.5)", "xs(0, 1)"] {
         let source = format!("fn bad() -> i32  {{ let mut xs = [1, 2]; {body} }}");
         assert!(generate(&parse(&source)).is_err(), "{source}");
     }
-    compile("fn explicit(p: Ptr<i32>) -> Ptr<i32>  { Ptr<i32>(u64(p) + u64(4)) }");
+    compile("fn explicit(p: PtrMut<i32>) -> PtrMut<i32>  { PtrMut<i32>(u64(p) + u64(4)) }");
 }
 
 #[test]

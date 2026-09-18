@@ -59,7 +59,7 @@ pub(super) fn check_references(definitions: &[TypeDef], ty: &Ty) -> Result<(), D
             }
         }
         Ty::Error { payload } => check_references(definitions, payload)?,
-        Ty::Pointer { pointee }
+        Ty::Pointer { pointee, .. }
         | Ty::Reference {
             referent: pointee, ..
         } => check_references(definitions, pointee)?,
@@ -146,6 +146,7 @@ mod definition_tests {
         let named = Ty::Defined { definition: id };
         for indirect in [
             Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(named.clone()),
             },
             Ty::pointer_length(named.clone()),
@@ -354,6 +355,7 @@ impl TypeTable {
         match ty {
             Ty::Str => {
                 self.intern(&Ty::Pointer {
+                    mutable: false,
                     pointee: Box::new(Ty::UInt8),
                 });
                 self.intern(&Ty::UInt64);
@@ -367,7 +369,7 @@ impl TypeTable {
             Ty::Error { payload } => {
                 self.intern(payload);
             }
-            Ty::Pointer { pointee }
+            Ty::Pointer { pointee, .. }
             | Ty::Reference {
                 referent: pointee, ..
             } => {
@@ -435,7 +437,11 @@ pub(super) fn format_type(ty: &Ty, definitions: &[TypeDef]) -> String {
             if *mutable { "RefMut" } else { "Ref" },
             format_type(referent, definitions)
         ),
-        Ty::Pointer { pointee } => format!("Ptr<{}>", format_type(pointee, definitions)),
+        Ty::Pointer { pointee, mutable } => format!(
+            "{}<{}>",
+            if *mutable { "PtrMut" } else { "Ptr" },
+            format_type(pointee, definitions)
+        ),
         Ty::GpuView => "GpuView".into(),
         Ty::GpuPipelineContract => "GpuPipelineContract".into(),
         Ty::GpuArguments => "GpuArguments".into(),
@@ -715,6 +721,7 @@ mod layout_tests {
             record(vec![
                 Ty::UInt32,
                 Ty::Pointer {
+                    mutable: true,
                     pointee: Box::new(node.clone()),
                 },
             ]),
@@ -958,6 +965,7 @@ fn projection_operation(
                 let element =
                     projection_pointer(definitions, source, target).ok_or_else(invalid)?;
                 Ok(GpuProjectionOperation::Pointer {
+                    writable: matches!(target, Ty::Pointer { mutable: true, .. }),
                     element: element.clone(),
                 })
             }
@@ -985,6 +993,7 @@ fn projection_operation(
                     projection_pointer(definitions, &source_fields[0].ty, &target_fields[0].ty)
                         .ok_or_else(invalid)?;
                 Ok(GpuProjectionOperation::Sequence {
+                    writable: matches!(target_fields[0].ty, Ty::Pointer { mutable: true, .. }),
                     element: element.clone(),
                 })
             }
@@ -1069,7 +1078,7 @@ fn projection_pointer<'a>(
     if field.ty != Ty::GpuView {
         return None;
     }
-    let Ty::Pointer { pointee } = target else {
+    let Ty::Pointer { pointee, .. } = target else {
         return None;
     };
     pointee.gpu_element(definitions).then_some(pointee)

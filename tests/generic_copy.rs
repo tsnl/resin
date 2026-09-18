@@ -28,7 +28,7 @@ fn repeated_generic_values_copy_structs_and_retain_shared_owners() {
     succeeds(
         r#"export { main }; import { "$/shared.resin" };
         struct Cell<T> { value: T }
-        struct Resource { drops: Ptr<i32> }
+        struct Resource { drops: PtrMut<i32> }
         fn drop(value: RefMut<Resource>) { value.drops.* = value.drops.* + 1; }
         fn twice<T>(value: T) -> (T, T) { (value, value) }
         fn branch<T>(value: T, flag: bool) -> T {
@@ -106,7 +106,7 @@ fn repeated_uses_require_copy_across_branches_loops_and_partial_moves() {
 fn single_use_generics_move_and_reinitialization_restores_availability() {
     succeeds(
         r#"export { main }; import { "$/shared.resin" };
-        struct Item { drops: Ptr<i32> }
+        struct Item { drops: PtrMut<i32> }
         fn drop(value: RefMut<Item>) { value.drops.* = value.drops.* + 1; }
         struct Pair<T> { first: T, second: T }
         fn identity<T>(value: T) -> T { value }
@@ -147,7 +147,7 @@ fn single_use_generics_move_and_reinitialization_restores_availability() {
 fn dependent_callbacks_borrow_without_requiring_copy() {
     succeeds(
         r#"export { main }; import { "$/shared.resin" };
-        struct Item { drops: Ptr<i32>, number: i32 }
+        struct Item { drops: PtrMut<i32>, number: i32 }
         fn drop(value: RefMut<Item>) { value.drops.* = value.drops.* + 1; }
         fn read(value: Ref<Item>) -> i32 { value.number }
         fn increment(value: RefMut<Item>) -> i32 { value.number = value.number + 1; value.number }
@@ -200,7 +200,7 @@ fn dependent_field_reads_respect_pointer_and_drop_boundaries() {
     }
     succeeds(
         r#"export { main }; import { "$/shared.resin" };
-        struct Item { drops: Ptr<i32> }
+        struct Item { drops: PtrMut<i32> }
         fn drop(value: RefMut<Item>) { value.drops.* = value.drops.* + 1; }
         struct Cell<T> { value: T }
         fn identity<T>(value: T) -> T { value }

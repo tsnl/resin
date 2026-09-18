@@ -420,7 +420,7 @@ impl<'a> Instances<'a> {
     ) -> Result<(FunctionId, resin_hir::Signature, Vec<resin_hir::Type>), LowerError> {
         let mut owner = receiver;
         while let resin_hir::MethodName::Named { .. } = name
-            && let resin_hir::Type::Pointer { pointee } = owner
+            && let resin_hir::Type::Pointer { pointee, .. } = owner
         {
             owner = pointee;
         }
@@ -623,7 +623,7 @@ impl<'a> Instances<'a> {
             referent: Box::new(self.nominal_origin(id)),
         };
         let result = substitution.ty(&signature.result.ty, self)?;
-        if receiver != expected || result != Ty::byte_span() {
+        if receiver != expected || result != Ty::byte_span(false) {
             return Err(invalid());
         }
         let hook = self

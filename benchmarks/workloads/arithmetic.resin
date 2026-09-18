@@ -2,18 +2,18 @@ export { Root, kernel, cpu };
 
 import { "$/span.resin" };
 
-intrinsic "pointer_index" fn device_index<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
+intrinsic "pointer_index_mut" fn device_index<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;
 
 struct Root {
 	count: u32,
 	iterations: u32,
-	input: Ptr<u32>,
-	output: Ptr<u32>,
+	input: PtrMut<u32>,
+	output: PtrMut<u32>,
 }
 
 // Loop-carried integer arithmetic without a data-dependent branch.
 @compute_shader
-fn kernel(index: u64, root: Ptr<Root>) {
+fn kernel(index: u64, root: PtrMut<Root>) {
 	if (index < u64(root.count)) {
 		let mut x = u32(index) * u32(747796405) + u32(2891336453);
 		let mut n: u32 = 0;
@@ -22,12 +22,12 @@ fn kernel(index: u64, root: Ptr<Root>) {
 			x = (x ^ (x * u32(65521))) + u32(1013904223);
 			n = n + u32(1);
 		};
-		let mut output = Span<u32> { data = root.output, length = u64(root.count) };
+		let mut output = SpanMut<u32> { data = root.output, length = u64(root.count) };
 		device_index(output.data, output.length, index).* = x;
 	};
 }
 
-fn cpu(root: Ptr<Root>) {
+fn cpu(root: PtrMut<Root>) {
 	let mut index: u64 = 0;
 	while (index < u64(root.count)) {
 		kernel(index, root);

@@ -131,7 +131,7 @@ fn bridge_body(
         .then_some(FunctionBody::Ordinary);
     }
     let (value, _) = declaration.result.fallible_parts()?;
-    let bytes = Ty::byte_span();
+    let bytes = Ty::byte_span(false);
     match name {
         "gpu_compute_pipeline" | "gpu_graphics_pipeline" | "gpu_ray_tracing_pipeline" => {
             let kind = match name {
@@ -298,7 +298,7 @@ impl Context {
             let Type::Function { params, .. } = shader else {
                 return Err("pipeline creation requires decorated shader declarations".into());
             };
-            if let Some(Type::Pointer { pointee }) = params.get(1) {
+            if let Some(Type::Pointer { pointee, .. }) = params.get(1) {
                 if root != Type::None && root != **pointee {
                     return Err("pipeline shaders must use the same root type".into());
                 }
@@ -497,7 +497,7 @@ impl Context {
                 continue;
             };
             let element = match (&projection.target, target) {
-                (Type::Pointer { .. }, Type::Pointer { pointee }) => Some(*pointee.clone()),
+                (Type::Pointer { .. }, Type::Pointer { pointee, .. }) => Some(*pointee.clone()),
                 (
                     Type::Defined {
                         definition: expected,

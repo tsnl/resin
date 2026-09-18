@@ -1759,6 +1759,10 @@
             "named": false
           },
           {
+            "type": "PtrMut",
+            "named": false
+          },
+          {
             "type": "Ref",
             "named": false
           },
@@ -1995,6 +1999,10 @@
   },
   {
     "type": "Ptr",
+    "named": false
+  },
+  {
+    "type": "PtrMut",
     "named": false
   },
   {

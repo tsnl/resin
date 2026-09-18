@@ -578,7 +578,7 @@ fn decorated_host_calls_need_no_spirv_opt() {
     });
     let temp = TempDir::new().unwrap();
     let input = temp.path().join("host.resin");
-    fs::write(&input, "export { main };\nimport { \"$/shared.resin\" };\n @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main() -> i32 | Err<_> { let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; kernel(u64(7), output_owner:get()); if (output == u32(7)) { 0 } else { 1 } }").unwrap();
+    fs::write(&input, "export { main };\nimport { \"$/shared.resin\" };\n @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i }; } fn main() -> i32 | Err<_> { let output_owner = arc_ptr_alloc(u32(0))?; let output: Ref<_> = output_owner:get().*; kernel(u64(7), output_owner:get()); if (output == u32(7)) { 0 } else { 1 } }").unwrap();
     success(&invoke_with(&service, temp.path(), &input, &[]));
 }
 
@@ -591,7 +591,7 @@ fn executable_build_retains_all_shader_stages_and_embeds_their_spirv() {
     let input = temp.path().join("stages.resin");
     fs::write(&input, r#"export { main };
         import { "$/graphics.resin", "$/gpu.resin" };
-        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
+        @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = { i + u32(1) }; }
         @vertex_shader fn vertex(i: i32) -> Vertex  {
             Vertex {
                 position = Position { x = f32(0.0), y = f32(0.0), z = f32(0.0), w = f32(1.0) },
@@ -1007,7 +1007,7 @@ fn specialization_failures_keep_source_excerpts_and_application_notes() {
         r#"export { main };
         struct Cell { value: i32 }
         fn get(cell: Ref<Cell>) -> Ref<i32> { cell.value }
-        fn address<T>(cell: Ref<T>) -> Ptr<i32> { &cell:get() }
+        fn address<T>(cell: Ref<T>) -> PtrMut<i32> { &cell:get() }
         fn main() { let cell = Cell { value = 1 }; address(cell); }
     "#,
         &[],

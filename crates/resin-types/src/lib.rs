@@ -143,9 +143,11 @@ pub struct GpuProjectionPlan {
 pub enum GpuProjectionOperation {
     Copy,
     Pointer {
+        writable: bool,
         element: Ty,
     },
     Sequence {
+        writable: bool,
         element: Ty,
     },
     Record {
@@ -245,6 +247,7 @@ pub enum Ty {
         definition: TypeId,
     },
     Pointer {
+        mutable: bool,
         pointee: Box<Ty>,
     },
     /// A borrowed place: `Ref` when read-only, `RefMut` when mutable. Neither grants a pointer.
@@ -304,7 +307,7 @@ impl Ty {
     /// The value accessed through a pointer or reference. This query grants no pointer capability.
     pub fn deref_target(&self) -> Option<&Ty> {
         match self {
-            Self::Pointer { pointee }
+            Self::Pointer { pointee, .. }
             | Self::Reference {
                 referent: pointee, ..
             } => Some(pointee),
@@ -390,7 +393,37 @@ impl Ty {
         types::view_record(self)
     }
 
+    /// Drop write permission without changing the referenced type or storage.
+    pub fn read_only(&self) -> Option<Self> {
+        match self {
+            Self::Pointer {
+                mutable: true,
+                pointee,
+            } => Some(Self::Pointer {
+                mutable: false,
+                pointee: pointee.clone(),
+            }),
+            Self::Reference {
+                mutable: true,
+                referent,
+            } => Some(Self::Reference {
+                mutable: false,
+                referent: referent.clone(),
+            }),
+            _ => None,
+        }
+    }
+
     pub fn pointer_cast(&self, to: &Self) -> bool {
+        if matches!(
+            (self, to),
+            (
+                Self::Pointer { mutable: false, .. },
+                Self::Pointer { mutable: true, .. }
+            )
+        ) {
+            return false;
+        }
         matches!(
             (self, to),
             (Self::Pointer { .. }, Self::Pointer { .. } | Self::UInt64)
@@ -435,6 +468,7 @@ impl Ty {
                 RecordField {
                     name: "data".into(),
                     ty: Self::Pointer {
+                        mutable: false,
                         pointee: Box::new(element),
                     },
                 },
@@ -446,12 +480,13 @@ impl Ty {
         }
     }
 
-    pub fn byte_span() -> Self {
+    pub fn byte_span(mutable: bool) -> Self {
         Self::Record {
             fields: vec![
                 RecordField {
                     name: "_0".into(),
                     ty: Self::Pointer {
+                        mutable,
                         pointee: Box::new(Self::UInt8),
                     },
                 },
@@ -798,6 +833,7 @@ pub enum Conv {
     Wrap { definition: TypeId },
     Deref,
     ViewRecord,
+    ReadOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -10,8 +10,8 @@ fn generate(source: &str) -> Result<resin_hir::Module, resin_source::SourceError
 #[test]
 fn intrinsic_declarations_keep_generic_signatures_and_ordinary_calls() {
     let module = generate(
-        r#"intrinsic "pointer_index" fn at<T>(data: Ptr<T>, length: u64, index: u64) -> Ptr<T>;
-        fn index<T>(data: Ptr<T>, length: u64) -> Ptr<T>  { at(data, length, 0) }
+        r#"intrinsic "pointer_index_mut" fn at<T>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<T>;
+        fn index<T>(data: PtrMut<T>, length: u64) -> PtrMut<T>  { at(data, length, 0) }
     "#,
     )
     .unwrap();
@@ -29,9 +29,9 @@ fn intrinsic_declarations_keep_generic_signatures_and_ordinary_calls() {
 fn intrinsic_contracts_reject_unknown_operations_and_forged_signatures() {
     for source in [
         r#"intrinsic "missing" fn wrong() -> u64;"#,
-        r#"intrinsic "pointer_index" fn wrong<T>(data: Ptr<T>, length: u64, index: i32) -> Ptr<T>;"#,
-        r#"intrinsic "pointer_index" fn wrong<T>(data: Ptr<T>, length: u64, index: u64) -> T;"#,
-        r#"intrinsic "pointer_index" fn wrong<T, U>(data: Ptr<T>, length: u64, index: u64) -> Ptr<U>;"#,
+        r#"intrinsic "pointer_index_mut" fn wrong<T>(data: PtrMut<T>, length: u64, index: i32) -> PtrMut<T>;"#,
+        r#"intrinsic "pointer_index_mut" fn wrong<T>(data: PtrMut<T>, length: u64, index: u64) -> T;"#,
+        r#"intrinsic "pointer_index_mut" fn wrong<T, U>(data: PtrMut<T>, length: u64, index: u64) -> PtrMut<U>;"#,
     ] {
         assert!(generate(source).is_err(), "{source}");
     }
@@ -40,7 +40,7 @@ fn intrinsic_contracts_reject_unknown_operations_and_forged_signatures() {
 #[test]
 fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
     let source = r#"struct Cell<T> { value: T, }
-        fn replace<T>(storage: Ptr<Cell<T>>, value: T) -> Cell<T>  {
+        fn replace<T>(storage: PtrMut<Cell<T>>, value: T) -> Cell<T>  {
             storage:replace(Cell<T> { value = value })
         }
         fn first<T>(value: T) -> T  {
@@ -54,7 +54,7 @@ fn pointer_and_array_methods_keep_generic_nominal_payloads_symbolic() {
 #[test]
 fn gpu_argument_operations_accept_explicit_values_in_both_call_spellings() {
     generate(
-        r#"fn record(arguments: Ptr<GpuArguments>, commands: Ptr<u8>) -> i32  {
+        r#"fn record(arguments: PtrMut<GpuArguments>, commands: PtrMut<u8>) -> i32  {
             arguments.*:dispatch_native(commands, 1, 1, 1);
             arguments.*:draw_native(commands, 3);
             dispatch_native(arguments.*, commands, 1, 1, 1);

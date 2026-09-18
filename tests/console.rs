@@ -76,7 +76,7 @@ fn lines_preserve_bytes_and_distinguish_empty_lines_from_eof() {
                 match (console_read_line()) {
                     InputLine(line) => {
 
-                        if (Ptr<u8>(u64(line:get().data) + line:get().length).* != u8(0)) {
+                        if (PtrMut<u8>(u64(line:get().data) + line:get().length).* != u8(0)) {
                             print("missing terminator");
                         } else {};
                         { let borrowed = fmt("[{0}:", (line:get().length,)); print(borrowed) };

@@ -12,7 +12,7 @@ struct First { value: i32, }
         type RecordAlias = Record;
         type Optional = i32 | None;
         type Flattened = None | Optional | i32;
-        struct Node { next: Ptr<Node>, value: Optional, }
+        struct Node { next: PtrMut<Node>, value: Optional, }
         fn nominal(x: Alias) -> First  { x }
         fn record(x: RecordAlias) -> Record  { x }
         fn optional(x: Flattened) -> Optional  { x }
@@ -68,7 +68,7 @@ fn both_emitters_use_payload_table_indices_as_union_tags() {
         struct HostOnly { unrelated: f64, }
         fn choose(i: u32) -> u32 | None  { if (i == u32(0)) { None } else { i } }
         fn main() -> i32  { i32(choose(u32(42))!) }
-        @compute_shader fn kernel(invocation: u64, output: Ptr<u32>)  { let mut i = u32(invocation); output.* = choose(i)!; }
+        @compute_shader fn kernel(invocation: u64, output: PtrMut<u32>)  { let mut i = u32(invocation); output.* = choose(i)!; }
         "#,
     );
     let optional = module.functions[0].result.clone();

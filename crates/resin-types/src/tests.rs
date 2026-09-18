@@ -179,6 +179,7 @@ fn invalid_references_and_layouts_leave_the_reservation_retryable() {
     for field in [
         invalid.clone(),
         Ty::Pointer {
+            mutable: true,
             pointee: Box::new(invalid.clone()),
         },
         Ty::pointer_length(invalid.clone()),
@@ -217,6 +218,7 @@ fn invalid_references_and_layouts_leave_the_reservation_retryable() {
         .define_type(
             definition,
             record(Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(named),
             }),
         )
@@ -309,6 +311,7 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
     let other = Ty::Defined { definition: second };
     let union = Ty::union([first, second]);
     let pointer = |ty| Ty::Pointer {
+        mutable: true,
         pointee: Box::new(ty),
     };
     let span_record = Ty::pointer_length(Ty::Int32);
@@ -386,6 +389,7 @@ fn explicit_conversions_preserve_ascription_and_pointer_boundaries() {
 fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
     let context = TyperContext::new();
     let pointer = Ty::Pointer {
+        mutable: false,
         pointee: Box::new(Ty::UInt8),
     };
     assert_eq!(context.type_field(&Ty::Str, "data").unwrap().ty, pointer);
@@ -399,10 +403,10 @@ fn string_views_expose_bytes_without_accepting_arbitrary_storage() {
             .unwrap(),
         vec![Conv::ViewRecord]
     );
-    assert!(context.ascribe(&Ty::Str, &Ty::byte_span()).is_err());
-    assert!(!Ty::Str.widens_to(&Ty::byte_span()));
-    assert!(!Ty::byte_span().widens_to(&Ty::Str));
-    assert!(context.ascribe(&Ty::byte_span(), &Ty::Str).is_err());
+    assert!(context.ascribe(&Ty::Str, &Ty::byte_span(false)).is_err());
+    assert!(!Ty::Str.widens_to(&Ty::byte_span(false)));
+    assert!(!Ty::byte_span(false).widens_to(&Ty::Str));
+    assert!(context.ascribe(&Ty::byte_span(false), &Ty::Str).is_err());
     assert!(
         context
             .ascribe(&Ty::Str.view_record().unwrap(), &Ty::Str)
@@ -425,6 +429,7 @@ fn opaque_gpu_values_preserve_ownership_without_exposing_pointer_operations() {
             Ty::UInt64,
             Ty::StrongOwner,
             Ty::Pointer {
+                mutable: true,
                 pointee: Box::new(Ty::UInt32),
             },
         ] {
@@ -449,6 +454,7 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
     assert!(!array.gpu_element(context.definitions()));
     for ty in [
         Ty::Pointer {
+            mutable: true,
             pointee: Box::new(Ty::UInt32),
         },
         Ty::pointer_length(Ty::UInt32),
@@ -486,6 +492,7 @@ fn gpu_primitive_types_intern_and_render_independently_of_source_wrappers() {
 #[test]
 fn gpu_projection_requires_explicit_nominal_metadata_and_preserves_element_types() {
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::UInt32),
     };
     let view = Ty::Defined {
@@ -506,10 +513,12 @@ fn gpu_projection_requires_explicit_nominal_metadata_and_preserves_element_types
     assert_eq!(
         plan.operation,
         crate::GpuProjectionOperation::Pointer {
+            writable: true,
             element: Ty::UInt32
         }
     );
     let retagged = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::Float32),
     };
     assert!(crate::gpu_projection_plan(&table, &view, &retagged).is_err());
@@ -567,6 +576,7 @@ fn shader_parameter(input: Ty, root: Ty) -> Vec<Ty> {
     vec![
         input,
         Ty::Pointer {
+            mutable: true,
             pointee: Box::new(root),
         },
     ]
@@ -773,6 +783,7 @@ fn references_preserve_access_without_pointer_conversions_or_shared_layout() {
         referent: Box::new(Ty::Bool),
     };
     let pointer = Ty::Pointer {
+        mutable: true,
         pointee: Box::new(Ty::Bool),
     };
     let context = TyperContext::new();
