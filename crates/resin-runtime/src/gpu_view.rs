@@ -302,6 +302,29 @@ unsafe fn checked_device_pointer(
     Ok(address)
 }
 
+/// Borrow an address from a retained allocation. Mapping is persistent until the
+/// allocation is released; escaped addresses carry neither ownership nor a device tag.
+pub(crate) unsafe fn address(
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    access: u32,
+    host: bool,
+) -> Result<u64, ResinStatus> {
+    let owner = unsafe { allocation_owner(value) }.map_err(|_| ResinStatus::InvalidArgument)?;
+    if host {
+        if owner.allocation.host_pointer().is_null() {
+            return Err(ResinStatus::Unsupported);
+        }
+        unsafe { checked_host(value, bytes, alignment, access) }
+            .map(|pointer| pointer as usize as u64)
+            .map_err(|_| ResinStatus::InvalidArgument)
+    } else {
+        unsafe { checked_device_pointer(value, bytes, alignment, owner.gpu, access) }
+            .map_err(|_| ResinStatus::InvalidArgument)
+    }
+}
+
 unsafe fn checked_projection_pointer(
     projection: &mut ProjectionOwner,
     value: ResinGpuPtr,

@@ -1,6 +1,6 @@
 // ANCHOR: workgroup
-export { main, kernel };
-import { "$/workgroup.resin", "$/span.resin", "$/shared.resin" };
+export { main, host_main, kernel };
+import { "$/workgroup.resin", "$/span.resin", "$/shared.resin", "$/gpu.resin" };
 
 struct State { left: f32, right: f32 }
 struct Root { output: SpanMut<f32> }
@@ -14,7 +14,7 @@ fn sum(left: Ref<f32>, right: Ref<f32>) -> f32 {
 }
 
 @compute_shader
-fn kernel(index: u64, root: PtrMut<Root>, group: Workgroup<State>) {
+fn kernel(index: u64, root: Ptr<Root>, group: Workgroup<State>) {
 	let lane = group:lane_index();
 	let width = group:lane_count();
 	let base = index - lane;
@@ -32,7 +32,7 @@ fn kernel(index: u64, root: PtrMut<Root>, group: Workgroup<State>) {
 	};
 }
 
-fn main() -> i32 | Err<_> {
+fn host_main() -> i32 | Err<_> {
 	let output = arc_span_alloc::<f32>(1, 0)?;
 	let root = arc_ptr_alloc(Root { output = output:get() })?;
 	let mut state = State { left = 0, right = 0 };
@@ -40,6 +40,27 @@ fn main() -> i32 | Err<_> {
 	kernel(0, root:get(), state);
 	let view = output:get();
 	assert(view:at(0) == f32(3));
+	0
+}
+// The GPU invokes the same entry for every lane. Only the root is supplied;
+// Workgroup<State> is allocated and initialized by the shader wrapper.
+fn main() -> i32 | Err<_> {
+	let gpu = gpu_new()?;
+	let width = gpu:compute_workgroup_size();
+	let output = gpu:alloc::<f32>(width * 3)?;
+	let pipeline = gpu:create_compute_pipeline(kernel)?;
+	let commands = gpu:start_command_recording()?;
+	let root = Root { output = output:device() };
+	commands:dispatch(pipeline, root, 3, 1, 1)?;
+	commands:submit()?;
+	// The owner remains alive while both device and mapped host spans are used.
+	let values = output:map()?;
+	let mut group: u64 = 0;
+	while (group < 3) {
+		let base = group * width;
+		assert(values:at(base) == f32(base * 2 + 3));
+		group = group + 1;
+	};
 	0
 }
 // ANCHOR_END: workgroup

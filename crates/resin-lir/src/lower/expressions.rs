@@ -187,6 +187,15 @@ impl FunctionLowering<'_> {
                     "GPU projection contract reached storage lowering",
                 ));
             }
+            Intrinsic::GpuViewAddress { host, .. } => {
+                let Ty::Record { fields } = result else {
+                    unreachable!("address result");
+                };
+                self.emit(Instr::GpuViewAddress {
+                    pointer: fields[0].ty.without_none().expect("address result").clone(),
+                    host,
+                });
+            }
             Intrinsic::GpuViewLoad => self.emit(Instr::GpuViewLoad {
                 element: result.clone(),
             }),

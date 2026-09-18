@@ -228,7 +228,13 @@ pub(super) fn needs_drop(ty: &Ty, definitions: &[TypeDef]) -> bool {
 
 pub(super) fn gpu_element(ty: &Ty, definitions: &[TypeDef]) -> bool {
     let plain = match ty {
-        Ty::UInt8 | Ty::Int32 | Ty::UInt32 | Ty::Int64 | Ty::UInt64 | Ty::Float32 => true,
+        Ty::UInt8
+        | Ty::Int32
+        | Ty::UInt32
+        | Ty::Int64
+        | Ty::UInt64
+        | Ty::Float32
+        | Ty::Pointer { .. } => true,
         Ty::Array { element, .. } => gpu_element(element, definitions),
         Ty::Error { payload } => gpu_element(payload, definitions),
         Ty::Record { fields } => fields

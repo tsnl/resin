@@ -151,6 +151,7 @@ fn lower_region(
                     | Instr::OwnerDowngrade
                     | Instr::OwnerUpgrade
                     | Instr::GpuViewAllocate
+                    | Instr::GpuViewAddress { .. }
                     | Instr::GpuViewLoad { .. }
                     | Instr::GpuViewStore
                     | Instr::GpuViewReplace
@@ -449,6 +450,7 @@ fn instruction(
         | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict
+        | Instr::GpuViewAddress { .. }
         | Instr::GpuViewLoad { .. }
         | Instr::GpuViewStore
         | Instr::GpuViewReplace

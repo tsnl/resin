@@ -426,8 +426,8 @@ impl Context {
                 "pipeline recording and GPU allocation must use the same error type".into(),
             );
         }
-        let input = if root == Type::None {
-            Type::None
+        let input = if root == Type::None || inputs.get(1) == Some(&root) {
+            root.clone()
         } else {
             self.source_projection(&root, 0)?
         };

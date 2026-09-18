@@ -70,6 +70,7 @@ pub(crate) fn stack_effect(instr: &crate::Instr) -> StackEffect {
     use crate::Instr;
     match instr {
         Instr::GpuViewRange { .. } => StackEffect { pops: 4, pushes: 1 },
+        Instr::GpuViewAddress { .. } => StackEffect { pops: 2, pushes: 1 },
         Instr::GpuViewLoad { .. } => StackEffect { pops: 1, pushes: 1 },
         Instr::GpuViewRestrict | Instr::GpuViewStore | Instr::GpuViewReplace => {
             StackEffect { pops: 2, pushes: 1 }

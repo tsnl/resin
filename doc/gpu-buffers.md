@@ -1,142 +1,102 @@
-# GPU pointers, spans, and shader arguments
+# GPU allocations, pointers, and mapping
 
-`GpuPtr<T>` owns a read-only view into a GPU allocation. `GpuSpan<T>` adds an element count.
-`GpuPtrMut<T>` and `GpuSpanMut<T>` grant write access as well.
-Value copies, explicit clones, indexed pointers, and slices retain the allocation and its GPU. Both are
-ordinary generic source structs over an opaque `GpuView` primitive. Neither
-exposes a raw host pointer or a device-address query. Import `$/gpu.resin` for
-these wrappers and device operations. Shader roots using borrowed `Span<T>` also
-need an explicit `$/span.resin` import.
+GPU allocations have an owning handle and separate borrowed views. `gpu:create(value)?`
+returns `GpuPtrMut<T>` for one value; `gpu:alloc::<T>(count)?` returns `GpuSpanMut<T>`
+for a sequence. Copies, indexed views, and slices retain the allocation and its GPU.
+Their `:read_only()` counterparts are `GpuPtr<T>` and `GpuSpan<T>`.
 
-```resin
-let gpu = gpu_new()?;
-let scalar = gpu:create(42)?;                  // GpuPtrMut<i64>, inferred from the value
-let values = gpu:alloc::<f32>(1024)?;
-let mut index: u64 = 0;
-while (index < values.length) {
-    values:store(index, f32(1.0));
-    index = index + u64(1);
-};
-let first = values:slice(0, 16);            // GpuSpanMut<f32>, same owner
-let readable = first:read_only();
-```
+Import `$/gpu.resin` for allocation and mapping, and `$/span.resin` for ordinary
+span operations. The GPU wrappers are source structs over the opaque `GpuView` owner.
 
-`gpu:create(initial)` initializes one element and infers its type from the value
-or result context; `gpu:create::<T>(initial)` supplies it explicitly.
-`gpu:alloc::<T>(count)` allocates uninitialized storage with checked layout and
-size arithmetic. Initialize elements before reading or using them in a shader.
-Both use default host-visible memory. Pass the exported `i32` constants
-`memory_default`, `memory_gpu`, or `memory_readback` to `gpu:alloc_in::<T>(count, memory)`
-to select a memory mode. Allocation methods are ordinary generic free functions and
-report a typed `RuntimeError`.
+## Two addresses, ordinary pointer types
 
-GPU elements have the same host and shader layout and cannot contain pointers,
-spans, managed owners, or custom destruction hooks. Supported scalar storage is
-`u8`, `i32`, `u32`, `i64`, `u64`, and `f32`, with arrays and records of
-these types. Floating literals require `f32` context or an explicit `f32(...)`
-application; the default `f64` has no supported shader storage layout.
+| Operation | One value | Sequence |
+| --- | --- | --- |
+| Writable allocation `:device()` | `PtrMut<T>` | `SpanMut<T>` |
+| Read-only allocation `:device()` | `Ptr<T>` | `Span<T>` |
+| Writable allocation `:map()?` | `PtrMut<T>` | `SpanMut<T>` |
+| Read-only allocation `:map()?` | `Ptr<T>` | `Span<T>` |
 
-## Checked host access
+`device()` borrows a Vulkan buffer device address for shader use. `map()` borrows
+its coherent CPU mapping. The two addresses may differ. Neither operation copies
+elements, retains the owner, translates nested pointers, or waits for GPU work.
 
-Both pointer kinds support `pointer:load()`. Mutable pointers additionally support
-`pointer:store(value)` and `pointer:replace(value)`. These perform
-checked host access; `replace` returns the previous value. `span:at(index)`
-returns an owning pointer, and `:slice(start, length)` returns an owning span.
-Indexing and slicing check bounds. To update a field, load its containing record,
-edit the local value, then store the record back. Host GPU views do not produce
-places or raw field addresses.
+Raw pointers are one machine word; spans add an element count. They carry no device
+or address-space tag. The caller keeps the allocation alive, supplies addresses
+valid for the processor and device executing the code, and synchronizes accesses.
+This is the same unchecked lifetime contract as other borrowed Resin pointers.
 
-Write permission is part of the view type. `:read_only()` returns the read-only
-counterpart and restricts its runtime access too. `:write_only()` is a runtime
-restriction on a writable view: reads trap. Neither restores removed permissions.
-Their checks apply to loads, stores, replacements, and copies. Existing aliases
-keep their own permissions. Access also checks the allocation range, alignment,
-host mapping, and whether a recording currently holds the allocation for GPU work.
-An invalid host access traps. These are compiler/runtime checks, not OS page
-protection or a static borrow checker.
+Mappings are persistent for the allocation lifetime and reused by repeated `map()`
+calls. There is no per-view unmap operation: allocations may share a mapped backing
+slab. Releasing the last allocation owner ends the borrowed pointer's lifetime.
+Mapping uses ordinary Vulkan host-visible memory; `VK_EXT_map_memory_placed` and
+identical CPU/GPU virtual addresses are not required.
 
-Use `span:copy_to(destination)` to copy into an ordinary `SpanMut<T>` whose memory the
-caller owns. This checks GPU read permissions and the destination length; it does
-not expose a raw pointer into the GPU allocation. [Gradient](../examples/gradient.resin)
-and [triangle](../examples/triangle.resin) copy completed GPU output into host
-memory before writing a PNG.
+## Allocate, dispatch, map
 
-## Typed pipelines and compiler projection
+The [gradient example](../examples/gradient.resin) uses one root type containing
+`SpanMut<u32>`. It supplies `pixels:device()` when recording, waits through
+`commands:submit()?`, then uses `pixels:map()?` to write a PNG. The owning `pixels`
+handle stays alive throughout.
 
-Create pipelines from decorated shader declarations. The compiler preserves their
-root type and stage, then checks host arguments when recording a dispatch or draw:
+A launch argument with exactly the shader root's type is copied into a retained
+root snapshot. Its pointer bits are preserved. **The snapshot does not retain the
+allocations referenced by raw pointers.** Keep those owners alive until submission
+finishes or the recording is canceled. Graphics and ray tracing use the same rule.
 
-```resin
-struct Params { values: SpanMut<f32>, scale: f32, }
+Shader functions remain ordinary host-callable functions. A host call supplies a
+host root containing host pointers; a GPU launch supplies device pointers. See
+[workgroups](workgroups.md) for an example that shares a cooperative algorithm.
 
-@compute_shader
-fn kernel(index: u64, root: Ptr<Params>)  {
-    if (index < root.values.length) {
-        let mut value: RefMut<f32> = root.values:at_mut(index);
-        value = value * root.scale;
-    };
-}
+## Nested pointers
 
-struct HostParams { values: GpuSpanMut<f32>, scale: f32, }
-let pipeline = gpu:create_compute_pipeline(kernel)?;
-let commands = gpu:start_command_recording()?;
-commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
-commands:submit()?;
-```
+GPU elements may contain ordinary pointers and spans. Construct device graphs by
+storing addresses obtained through `device()` in their nodes. Vulkan buffer device
+addressing lets shaders follow those pointers directly, without descriptor bindings
+or recursive relocation.
 
-The inferred pipeline type is `GpuComputePipeline<Params, GpuPipelineOwner>`.
-`GpuGraphicsPipeline<Params, GpuPipelineOwner>` is the corresponding graphics type;
-its factory takes a vertex and fragment declaration. Both graphics stages must use
-the same root type when both have a root parameter. Rootless graphics pipelines use
-`None` as their root type and accept `commands:draw(pipeline, None, count)`.
+Mapping a node exposes its bytes unchanged. If its `next` field contains a device
+pointer, that field is still a device pointer when read through the CPU mapping.
+Obtain the child's host mapping explicitly before accessing the child on the CPU.
+Uploading an arbitrary host pointer graph does not make its pointers GPU-accessible.
 
-Pipeline wrappers move by value and retain another shared native owner when
-copied. Pipeline and command parameters borrow their wrappers. Explicit parameter types can name `GpuPipelineOwner`, exported
-by the GPU module. Each wrapper stores an opaque `GpuPipelineContract` containing
-the originating root type, owner type, and shader stage. Dispatch and draw validate
-that contract before projecting arguments. Changing a wrapper annotation cannot
-authorize a different root or stage.
+Supported elements use the shared host/shader layout: `u8`, `i32`, `u32`, `i64`,
+`u64`, `f32`, pointers, nonempty arrays, and records of supported fields. Owners,
+drop hooks, booleans, and unions are not supported buffer elements. Choose `f32`
+explicitly for shared floating-point data; the default `f64` is not supported here.
+Shader pointer/integer casts and pointer reinterpretation remain unsupported;
+use typed fields and indexing.
 
-Dispatch and draw derive the host record from the pipeline's declared root type: a
-shader `Ptr<T>` field receives a host `GpuPtr<T>`, and a shader `Span<T>` field
-receives a host `GpuSpan<T>`. The writable `PtrMut`/`SpanMut` fields require
-`GpuPtrMut`/`GpuSpanMut`. Scalars and nested records keep their values. The
-compiler validates explicit projection declarations on the source wrappers,
-creates a separate shader root, translates GPU views internally, and
-retains every referenced allocation. An indexed or sliced view preserves its byte
-offset. Projection occurs inside recording; the public GPU API exposes no untyped
-projected root to construct or reuse.
+## Memory modes
 
-Pipeline creation requires decorated declarations directly. Runtime function aliases
-and arbitrary shader bytes are not accepted. Compiled representations are private to
-code generation and the runtime; shader functions have no `.spirv` property. Pointers inside GPU buffer elements are rejected:
-projection handles the launch record, not recursively mapped pointer graphs. Raw
-host pointers cannot substitute for GPU views. Projection preserves read-only or writable permissions from the declared pointer
-and span types. Shader pointer
-casts are rejected, including pointer/integer conversions and reinterpretation of a
-pointer's element type. Use typed indexing for buffer access.
+`gpu:alloc_in::<T>(count, memory)` selects:
 
-## Recording and lifetime
+- `memory_default`: persistently mapped coherent memory, preferring device-local
+  storage when available.
+- `memory_readback`: persistently mapped coherent memory intended for GPU results.
+- `memory_gpu`: device-local storage without a CPU mapping. `map()` returns
+  `Err(Unsupported {})`; it does not silently allocate staging memory.
 
-`commands:dispatch(pipeline, arguments, x, y, z)` and
-`commands:draw(pipeline, arguments, count)` bind the supplied pipeline and project
-its checked host arguments. Copyable host records can be copied or reconstructed for compatible pipelines,
-as in [particles](../examples/particles.resin); each recording creates its own root.
+Allocation checks size arithmetic and alignment. Zero-length spans are valid;
+they have no accessible elements. Slices preserve offsets, lengths, and permissions
+for both address queries. A read-only view cannot grant a writable mapping.
 
-Successful recording retains the root and its referenced allocations through
-synchronous submission or cancellation. Those allocations reject CPU access while
-recorded work can use them. Submit consumes the recording, and aliases observe the
-same consumed state. Dropping an unfinished recording cancels it. Resources from a
-different GPU are rejected before use. If submission fails and a fallback device-idle
-wait cannot confirm completion, the runtime terminates before releasing resources
-that the GPU may still use.
-See [lifetime rules](lifetimes.md).
+## Checked owner access and retained launch arguments
 
-The unsafe [native C ABI](../crates/resin-runtime/include/resin_runtime/gpu.h)
-retains its explicit native handles and device addresses. The Resin API obtains
-shader addresses through compiler projection.
+The owning wrappers also offer immediate checked access: `load`, mutable `store`
+and `replace`, bounded `copy_from`, and `copy_to`. These check mapping, range,
+alignment, permissions, and outstanding recorded uses known to the runtime.
+`write_only()` restricts a writable owner at runtime; reads and address queries
+that would grant read access fail. Existing aliases keep their own permissions.
+Raw escaped pointers are not tracked by these checks.
 
-The GPU module implements pipeline creation and recording through explicitly
-decorated compiler bridges. Their native signatures are checked separately from
-the typed public calls. Bridge implementations handle native owners and internal
-`GpuArguments`, and must preserve resource retention through recording completion.
+Existing retained launch records remain supported: registered `GpuPtr`/`GpuSpan`
+fields project to corresponding shader `Ptr`/`Span` fields, with mutable variants
+preserving write permission. This convenience path retains those explicit owners
+with the recording. It translates only the launch record, never a pointee graph.
+An explicit root containing borrowed addresses avoids that translation.
+
+Pipeline tokens preserve root type, stage, and native owner identity. Pipeline
+creation requires decorated shader declarations, and dispatch/draw validate the
+token before recording. Rootless graphics pipelines use `None`. Recorded pipelines,
+images, and root snapshots remain alive until submission or cancellation.

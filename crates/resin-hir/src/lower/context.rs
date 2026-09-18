@@ -709,6 +709,21 @@ pub(super) fn primitive_signature(
             vec![Type::GpuView, Type::UInt32],
             Type::GpuView,
         ),
+        (
+            "gpu_view_map" | "gpu_view_map_mut" | "gpu_view_device" | "gpu_view_device_mut",
+            [element],
+        ) => {
+            let host = matches!(operation, "gpu_view_map" | "gpu_view_map_mut");
+            let mutable = matches!(operation, "gpu_view_map_mut" | "gpu_view_device_mut");
+            (
+                Intrinsic::GpuViewAddress { host, mutable },
+                vec![Type::GpuView, Type::UInt64],
+                record(&[
+                    ("_0", optional(pointer(element.clone(), mutable))),
+                    ("_1", Type::Int32),
+                ]),
+            )
+        }
         ("gpu_view_load", [element]) => {
             (Intrinsic::GpuViewLoad, vec![Type::GpuView], element.clone())
         }

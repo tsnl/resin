@@ -452,12 +452,22 @@ fn gpu_element_storage_excludes_references_and_custom_destruction() {
     assert!(array.gpu_element(context.definitions()));
     context.define_drop(id, FunctionId::from_index(0));
     assert!(!array.gpu_element(context.definitions()));
+    // Raw addresses are shared storage regardless of the pointee layout.
     for ty in [
         Ty::Pointer {
             mutable: true,
-            pointee: Box::new(Ty::UInt32),
+            pointee: Box::new(Ty::StrongOwner),
         },
         Ty::pointer_length(Ty::UInt32),
+    ] {
+        assert!(ty.gpu_element(&[]));
+        assert!(record(ty).gpu_element(&[]));
+    }
+    for ty in [
+        Ty::Reference {
+            mutable: false,
+            referent: Box::new(Ty::UInt32),
+        },
         Ty::GpuView,
         Ty::GpuPipelineContract,
         Ty::GpuArguments,
@@ -522,7 +532,12 @@ fn gpu_projection_requires_explicit_nominal_metadata_and_preserves_element_types
         pointee: Box::new(Ty::Float32),
     };
     assert!(crate::gpu_projection_plan(&table, &view, &retagged).is_err());
-    assert!(crate::gpu_projection_plan(&table, &pointer, &pointer).is_err());
+    assert_eq!(
+        crate::gpu_projection_plan(&table, &pointer, &pointer)
+            .unwrap()
+            .operation,
+        crate::GpuProjectionOperation::Copy,
+    );
     assert!(crate::gpu_projection_plan(&table, &Ty::GpuArguments, &pointer).is_err());
     let TypeDef::Nominal { drop, .. } = &mut table[0] else {
         unreachable!()

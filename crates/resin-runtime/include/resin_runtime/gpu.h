@@ -119,6 +119,10 @@ ResinStatus resin_gpu_ptr_allocate(
     size_t alignment,
     int32_t memory,
     ResinGpuPtr *out);
+/* Borrow an address for the allocation lifetime. host=1 selects its coherent
+   CPU mapping; host=0 selects its device address. Does not retain the owner. */
+ResinStatus resin_gpu_ptr_address(ResinGpuPtr value, size_t bytes, size_t alignment,
+    uint32_t access, uint32_t host, uint64_t *out);
 void *resin_gpu_ptr_host(
     ResinGpuPtr value,
     size_t bytes,

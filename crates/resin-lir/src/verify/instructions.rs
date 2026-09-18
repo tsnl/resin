@@ -67,6 +67,7 @@ pub(super) fn check_instr(
         | Instr::GpuViewRange { .. }
         | Instr::GpuViewOffset
         | Instr::GpuViewRestrict
+        | Instr::GpuViewAddress { .. }
         | Instr::GpuViewLoad { .. }
         | Instr::GpuViewStore
         | Instr::GpuViewReplace

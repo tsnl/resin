@@ -2213,7 +2213,7 @@ impl Inference<'_> {
         } else {
             1
         };
-        let Some(inputs) = args[1..]
+        let Some(mut inputs) = args[1..]
             .iter()
             .take(needed)
             .map(|ty| self.solver.complete(&Type::value(ty.clone())))
@@ -2221,6 +2221,15 @@ impl Inference<'_> {
         else {
             return Ok(None);
         };
+        // An explicit root already has the shader's type and pointer bits. Its
+        // addresses are caller-managed; only the root value is snapshotted.
+        if matches!(bridge.body, FunctionBody::GpuPipelineRecord { .. })
+            && let Some(input) = args
+                .get(2)
+                .and_then(|ty| self.solver.complete(&Type::value(ty.clone())))
+        {
+            inputs.push(input);
+        }
         let mut method = self
             .typer
             .source_pipeline_method(bridge, &inputs)

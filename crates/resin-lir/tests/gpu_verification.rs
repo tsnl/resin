@@ -162,3 +162,44 @@ fn gpu_readback_requires_a_writable_host_destination() {
         resin_lir::verify(&module).unwrap();
     }
 }
+
+#[test]
+fn gpu_addresses_require_a_plain_pointee_and_preserve_permission() {
+    for host in [false, true] {
+        for mutable in [false, true] {
+            let pointer = Ty::Pointer {
+                mutable,
+                pointee: Box::new(Ty::UInt32),
+            };
+            let result = Ty::Record {
+                fields: vec![
+                    RecordField {
+                        name: "_0".into(),
+                        ty: Ty::union_of([pointer.clone(), Ty::None]),
+                    },
+                    RecordField {
+                        name: "_1".into(),
+                        ty: Ty::Int32,
+                    },
+                ],
+            };
+            let mut module = module(
+                Ty::GpuView,
+                result,
+                vec![uint(1), Instr::GpuViewAddress { pointer, host }],
+            );
+            resin_lir::verify(&module).unwrap();
+            for pointer in [
+                Ty::UInt64,
+                Ty::Pointer {
+                    mutable,
+                    pointee: Box::new(Ty::StrongOwner),
+                },
+            ] {
+                *module.functions[0].blocks[0].instrs.last_mut().unwrap() =
+                    Instr::GpuViewAddress { pointer, host };
+                assert!(resin_lir::verify(&module).is_err());
+            }
+        }
+    }
+}

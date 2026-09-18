@@ -45,6 +45,9 @@ pub(super) fn instruction(
             writeln!(out, "  {name}_view.access &= {};", args[1].expr).unwrap();
             Ok(format!("{name}_view"))
         }
+        Instr::GpuViewAddress { pointer, host } => {
+            address(types, name, pointer, *host, args, result, out)
+        }
         Instr::GpuViewLoad { element } => Ok(format!(
             "*({} *)resin_gpu_ptr_host({}, sizeof({}), _Alignof({}), 1u)",
             types.name(element),
@@ -171,4 +174,32 @@ fn checked_bytes(
     )
     .unwrap();
     bytes
+}
+
+fn address(
+    types: &Types<'_>,
+    name: &str,
+    pointer: &Ty,
+    host: bool,
+    args: &[Slot],
+    result: &Ty,
+    out: &mut String,
+) -> Result<String, Error> {
+    let Ty::Pointer { pointee, mutable } = pointer else {
+        unreachable!("verified GPU address");
+    };
+    let bytes = checked_bytes(types, pointee, &args[1].expr, name, out);
+    let access = if *mutable { 3 } else { 1 };
+    let some = types.tag(&Case::Type(pointer.clone()));
+    let none = types.tag(&Case::Type(Ty::None));
+    writeln!(out, "  {} {name}_result = {{0}};", types.name(result)).unwrap();
+    writeln!(out, "  uint64_t {name}_address = 0;").unwrap();
+    writeln!(out, "  {name}_result.f1 = resin_gpu_ptr_address({}, {bytes}, _Alignof({}), {access}u, {}u, &{name}_address);", args[0].expr, types.name(pointee), u32::from(host)).unwrap();
+    writeln!(
+        out,
+        "  {name}_result.f0.tag = {name}_result.f1 == 0 ? {some}u : {none}u;"
+    )
+    .unwrap();
+    writeln!(out, "  if ({name}_result.f1 == 0) {name}_result.f0.payload.v{some} = ({}) (uintptr_t){name}_address;", types.name(pointer)).unwrap();
+    Ok(format!("{name}_result"))
 }
