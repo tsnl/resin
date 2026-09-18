@@ -12,6 +12,9 @@ use super::{ResinGpuDeviceInfo, ResinGpuDeviceType, vk_status};
 const KHR_MAINTENANCE8_NAME: &CStr = c"VK_KHR_maintenance8";
 
 pub struct DeviceContext {
+    pub device_addresses: bool,
+    pub vertex_storage_writes: bool,
+    pub fragment_storage_writes: bool,
     pub entry: Entry,
     pub instance: Instance,
     pub device: Device,
@@ -27,18 +30,27 @@ pub struct DeviceContext {
 }
 
 pub fn create_device() -> Result<DeviceContext, ResinStatus> {
-    create(None, None)
+    create(None, None, true)
 }
 
 pub fn create_device_at(index: u32) -> Result<DeviceContext, ResinStatus> {
-    create(None, Some(index))
+    create(None, Some(index), true)
 }
 
 pub fn create_device_for_window(window: &ResinWindow) -> Result<DeviceContext, ResinStatus> {
-    create(Some(window), None)
+    create(Some(window), None, true)
 }
 
-fn create(window: Option<&ResinWindow>, index: Option<u32>) -> Result<DeviceContext, ResinStatus> {
+#[cfg(any(test, feature = "test-support"))]
+pub(super) fn create_without_device_addresses() -> Result<DeviceContext, ResinStatus> {
+    create(None, None, false)
+}
+
+fn create(
+    window: Option<&ResinWindow>,
+    index: Option<u32>,
+    device_addresses: bool,
+) -> Result<DeviceContext, ResinStatus> {
     let extensions = window
         .map(ResinWindow::extensions)
         .transpose()?
@@ -63,7 +75,12 @@ fn create(window: Option<&ResinWindow>, index: Option<u32>) -> Result<DeviceCont
         select_device(&instance, &devices, surface.as_ref()).ok_or(ResinStatus::Unsupported)
     };
     match selected {
-        Ok(selected) => finish_device(entry, instance, selected, surface),
+        Ok(mut selected) => {
+            if !device_addresses {
+                selected.vulkan12.buffer_device_address = vk::FALSE;
+            }
+            finish_device(entry, instance, selected, surface)
+        }
         Err(err) => {
             drop(surface);
             unsafe { instance.destroy_instance(None) };
@@ -140,9 +157,10 @@ fn finish_device(
         vk::KHR_RAY_TRACING_PIPELINE_NAME,
         vk::KHR_DEFERRED_HOST_OPERATIONS_NAME,
     ];
-    let mut ray_tracing = ray_extensions
-        .iter()
-        .all(|name| has_extension(&extensions, name));
+    let mut ray_tracing = selected.vulkan12.buffer_device_address == vk::TRUE
+        && ray_extensions
+            .iter()
+            .all(|name| has_extension(&extensions, name));
     if ray_tracing {
         let mut features = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut acceleration)
@@ -208,6 +226,9 @@ fn finish_device(
     let queue = unsafe { device.get_device_queue(selected.queue_family, 0) };
 
     Ok(DeviceContext {
+        device_addresses: selected.vulkan12.buffer_device_address == vk::TRUE,
+        vertex_storage_writes: selected.features10.vertex_pipeline_stores_and_atomics == vk::TRUE,
+        fragment_storage_writes: selected.features10.fragment_stores_and_atomics == vk::TRUE,
         entry,
         instance,
         device,
@@ -358,7 +379,7 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
     let has_pageable = has_memory_priority
         && has_extension(&extensions, vk::EXT_PAGEABLE_DEVICE_LOCAL_MEMORY_NAME);
 
-    let shader_int64 = {
+    let features10 = {
         let mut features2 = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut vulkan12)
             .push_next(&mut vulkan13)
@@ -370,11 +391,10 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
             }
         }
         unsafe { instance.get_physical_device_features2(physical, &mut features2) };
-        features2.features.shader_int64
+        features2.features
     };
 
-    if shader_int64 != vk::TRUE
-        || vulkan12.buffer_device_address != vk::TRUE
+    if features10.shader_int64 != vk::TRUE
         || vulkan12.timeline_semaphore != vk::TRUE
         || vulkan13.synchronization2 != vk::TRUE
         || vulkan13.maintenance4 != vk::TRUE
@@ -415,9 +435,14 @@ fn inspect_device(instance: &Instance, physical: vk::PhysicalDevice) -> Option<S
         max_buffer_size: maint4.max_buffer_size,
         compute_workgroup_size: compute_workgroup_size(&properties.limits, subgroup.subgroup_size),
         // Enable the shader profile Resin emits, rather than every supported capability.
-        features10: vk::PhysicalDeviceFeatures::default().shader_int64(true),
+        features10: vk::PhysicalDeviceFeatures::default()
+            .shader_int64(true)
+            .vertex_pipeline_stores_and_atomics(
+                features10.vertex_pipeline_stores_and_atomics == vk::TRUE,
+            )
+            .fragment_stores_and_atomics(features10.fragment_stores_and_atomics == vk::TRUE),
         vulkan12: vk::PhysicalDeviceVulkan12Features::default()
-            .buffer_device_address(true)
+            .buffer_device_address(vulkan12.buffer_device_address == vk::TRUE)
             .storage_buffer8_bit_access(vulkan12.storage_buffer8_bit_access == vk::TRUE)
             .shader_int8(vulkan12.shader_int8 == vk::TRUE)
             .timeline_semaphore(true),

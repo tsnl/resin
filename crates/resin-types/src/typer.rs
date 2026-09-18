@@ -346,6 +346,11 @@ pub(super) fn validate_shader(
     if foreign {
         return Err("foreign functions cannot be shader entries".into());
     }
+    if matches!(stage, "ray_generation" | "miss" | "closest_hit")
+        && matches!(parameters.get(1), Some(Ty::Reference { .. }))
+    {
+        return Err("descriptor resource bundles currently support compute and graphics stages; ray tracing retains its pointer-root interface".into());
+    }
     let (input, root) = match parameters {
         [input] => (input, false),
         [input, Ty::Pointer { .. }] => (input, true),
@@ -539,6 +544,15 @@ fn graphics_root(
     else {
         unreachable!("validated fragment shader")
     };
+    if vertex_parameter.len() > 1
+        && fragment_parameter.len() > 1
+        && matches!(vertex_parameter[1], Ty::Reference { .. })
+            != matches!(fragment_parameter[1], Ty::Reference { .. })
+    {
+        return Err(
+            "graphics stages must agree on descriptor resources versus pointer roots".into(),
+        );
+    }
     if vertex_color != fragment_color {
         return Err("vertex shader color and fragment shader input must have the same type".into());
     }

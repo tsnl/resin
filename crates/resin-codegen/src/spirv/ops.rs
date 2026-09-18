@@ -41,6 +41,7 @@ pub(super) fn instruction(
                     referent: Box::new(pointee.clone()),
                 },
                 id: locals[local.index()],
+                resource: None,
                 local: Some(LocalAddress {
                     root: locals[local.index()],
                     root_type: function.locals[local.index()].ty.clone(),
@@ -69,6 +70,7 @@ pub(super) fn instruction(
             return Ok(Some(Slot {
                 ty: result.unwrap().clone(),
                 id: locals[local.index()],
+                resource: None,
                 local: Some(LocalAddress {
                     root: locals[local.index()],
                     root_type: function.locals[local.index()].ty.clone(),
@@ -213,6 +215,9 @@ fn dereference(context: &mut Context<'_>, slot: &Slot) -> Result<Word, Error> {
     else {
         unreachable!()
     };
+    if let Some(offset) = slot.resource {
+        return super::buffers::constant(context, pointee, offset);
+    }
     if let Some(local) = &slot.local {
         let pointer = local_pointer(context, pointee, local)?;
         load(context, pointee, pointer)
@@ -263,6 +268,16 @@ fn project(
     index: usize,
     result: &Ty,
 ) -> Result<Slot, Error> {
+    if let Some(offset) = base.resource {
+        let referent = base.ty.deref_target().expect("resource reference");
+        let layout = super::buffers::address_layout(context.module, referent)?;
+        return Ok(Slot {
+            ty: result.clone(),
+            id: 0,
+            local: None,
+            resource: Some(offset + layout.offsets[index]),
+        });
+    }
     if let Some(mut local) = base.local.clone() {
         local.indices.push(LocalIndex::Static {
             index: index as u32,
@@ -270,6 +285,7 @@ fn project(
         return Ok(Slot {
             ty: result.clone(),
             id: local.root,
+            resource: None,
             local: Some(local),
         });
     }
@@ -294,6 +310,12 @@ fn index(
     result: &Ty,
     arrays: &HashMap<Ty, Word>,
 ) -> Result<Slot, Error> {
+    if base.resource.is_some() {
+        return Err(Error::unsupported(
+            "dynamic resource paths are not supported; load a plain array value before indexing it"
+                .into(),
+        ));
+    }
     if let Some(mut local) = base.local.clone() {
         local.indices.push(LocalIndex::Dynamic {
             id: index.id,
@@ -302,6 +324,7 @@ fn index(
         return Ok(Slot {
             ty: result.clone(),
             id: local.root,
+            resource: None,
             local: Some(local),
         });
     }

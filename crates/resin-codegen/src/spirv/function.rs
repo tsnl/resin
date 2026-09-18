@@ -18,7 +18,7 @@ pub(super) fn lower(
     flow: &FunctionTypes,
     index: usize,
     id: Word,
-    local_parameters: &[Option<super::calls::LocalParameter>],
+    local_parameters: &[Option<super::calls::Parameter>],
 ) -> Result<bool, Error> {
     let result = context.ty(&function.result)?;
     let parameters = function.locals[..function.parameter_count]
@@ -245,7 +245,7 @@ impl FunctionLowering<'_, '_> {
                     return self.exit(stack, ExitTarget::Merge { destination });
                 }
                 Terminator::Return => {
-                    if stack[0].local.is_some() {
+                    if stack[0].local.is_some() || stack[0].resource.is_some() {
                         return Err(Error::at(
                             self.context.module,
                             self.index,
@@ -290,7 +290,11 @@ impl FunctionLowering<'_, '_> {
         args: &[Slot],
         result: Option<&Ty>,
     ) -> Result<Option<Slot>, Error> {
-        if matches!(instruction, Instr::Call { .. }) && args.iter().any(|arg| arg.local.is_some()) {
+        if matches!(instruction, Instr::Call { .. })
+            && args
+                .iter()
+                .any(|arg| arg.local.is_some() || arg.resource.is_some())
+        {
             let (value, callee) = super::calls::local_call(self.context, args, result.unwrap())?;
             self.check_call_failure(callee)?;
             return Ok(Some(value));
@@ -298,7 +302,7 @@ impl FunctionLowering<'_, '_> {
         match instruction {
             Instr::SetLocal { local } => {
                 let variable = self.locals[local.index()];
-                if args[0].local.is_some() {
+                if args[0].local.is_some() || args[0].resource.is_some() {
                     self.aliases.insert(variable, args[0].clone());
                     return Ok(None);
                 }

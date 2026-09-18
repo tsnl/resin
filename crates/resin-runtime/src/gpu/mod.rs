@@ -1,5 +1,6 @@
 //! Vulkan compute, graphics, and presentation for the Resin C ABI.
 
+mod descriptors;
 mod device;
 mod pipeline;
 mod present;
@@ -58,6 +59,12 @@ const PUSH_CONSTANT_SIZE: u32 = 16;
 const COLOR_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
 pub struct ResinGpu {
+    device_addresses: bool,
+    vertex_storage_writes: bool,
+    fragment_storage_writes: bool,
+    storage_alignment: u64,
+    storage_range: u64,
+    storage_bindings: u32,
     ray: Option<ray::Device>,
     _entry: Entry,
     instance: Instance,
@@ -109,6 +116,8 @@ pub struct ResinImage {
 }
 
 pub struct ResinCommandBuffer {
+    resources: Option<Rc<descriptors::Layout>>,
+    descriptor_pools: Vec<descriptors::Pool>,
     ray: Option<ray::Dispatch>,
     device: Device,
     push_layout: vk::PipelineLayout,
@@ -174,6 +183,11 @@ impl ImageLayouts {
 }
 
 impl ResinGpu {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn create_without_device_addresses() -> Result<Self, ResinStatus> {
+        Self::from_context(device::create_without_device_addresses()?)
+    }
+
     pub fn create() -> Result<Self, ResinStatus> {
         Self::from_context(create_device()?)
     }
@@ -268,6 +282,15 @@ impl ResinGpu {
             .ray_tracing
             .then(|| ray::Device::new(&created.instance, &created.device, created.physical));
         Ok(Self {
+            device_addresses: created.device_addresses,
+            vertex_storage_writes: created.vertex_storage_writes,
+            fragment_storage_writes: created.fragment_storage_writes,
+            storage_alignment: properties.limits.min_storage_buffer_offset_alignment.max(8),
+            storage_range: properties.limits.max_storage_buffer_range as u64,
+            storage_bindings: properties
+                .limits
+                .max_descriptor_set_storage_buffers
+                .min(properties.limits.max_per_stage_descriptor_storage_buffers),
             ray,
             _entry: created.entry,
             instance: created.instance,
@@ -381,7 +404,11 @@ impl ResinGpu {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .usage(
                 vk::BufferUsageFlags::STORAGE_BUFFER
-                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                    | if self.device_addresses {
+                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                    } else {
+                        vk::BufferUsageFlags::empty()
+                    }
                     | vk::BufferUsageFlags::TRANSFER_SRC
                     | vk::BufferUsageFlags::TRANSFER_DST,
             );
@@ -413,7 +440,7 @@ impl ResinGpu {
         let device_memory = allocate_memory_with(
             requirements,
             &candidates,
-            true,
+            self.device_addresses,
             if use_dedicated {
                 DedicatedAllocation::Buffer(buffer)
             } else {
@@ -465,7 +492,11 @@ impl ResinGpu {
         };
 
         let address_info = vk::BufferDeviceAddressInfo::default().buffer(buffer);
-        let device_address = unsafe { self.device.get_buffer_device_address(&address_info) };
+        let device_address = if self.device_addresses {
+            unsafe { self.device.get_buffer_device_address(&address_info) }
+        } else {
+            0
+        };
         let size = bytes as u64;
 
         Ok(HeapBlock {
@@ -624,6 +655,8 @@ impl ResinGpu {
             return Err(vk_status(err));
         }
         Ok(ResinCommandBuffer {
+            resources: None,
+            descriptor_pools: Vec::new(),
             ray: None,
             device: self.device.clone(),
             push_layout: self.push_layout,
@@ -770,6 +803,9 @@ impl ResinGpu {
 }
 
 impl ResinAllocation {
+    pub(crate) fn buffer_offset(&self) -> u64 {
+        self.buffer_offset
+    }
     pub fn host_pointer(&self) -> *mut u8 {
         self.host
     }
@@ -830,6 +866,8 @@ impl ResinCommandBuffer {
             self.device
                 .cmd_bind_pipeline(self.handle, pipeline.bind_point, pipeline.handle);
         }
+        self.resources = pipeline.resources.clone();
+        self.push_layout = pipeline.layout;
         self.ray = pipeline.ray.clone();
         self.graphics = graphics;
         self.pipeline_bound = true;
@@ -921,12 +959,7 @@ impl ResinCommandBuffer {
     /// # Safety
     /// The root address and every shader-accessed address must be valid for the bound shaders. All resources must remain live through completion.
     pub unsafe fn draw(&mut self, root_data: u64, vertex_count: u32) -> Result<(), ResinStatus> {
-        if !self.pipeline_bound || !self.graphics || !self.rendering {
-            return Err(ResinStatus::InvalidArgument);
-        }
-        if vertex_count == 0 {
-            return Err(ResinStatus::InvalidArgument);
-        }
+        self.validate_draw(vertex_count)?;
         self.push_root(root_data);
         unsafe {
             self.device.cmd_draw(self.handle, vertex_count, 1, 0, 0);
@@ -1015,9 +1048,7 @@ impl ResinCommandBuffer {
         group_count_y: u32,
         group_count_z: u32,
     ) -> Result<(), ResinStatus> {
-        if !self.pipeline_bound || self.graphics || self.rendering || self.ray.is_some() {
-            return Err(ResinStatus::InvalidArgument);
-        }
+        self.validate_dispatch()?;
         cmd_memory_barrier(&self.device, self.handle);
         self.push_root(root_data);
         unsafe {
@@ -1025,6 +1056,21 @@ impl ResinCommandBuffer {
                 .cmd_dispatch(self.handle, group_count_x, group_count_y, group_count_z);
         }
         Ok(())
+    }
+
+    pub(crate) fn validate_dispatch(&self) -> Result<(), ResinStatus> {
+        if !self.pipeline_bound || self.graphics || self.rendering || self.ray.is_some() {
+            Err(ResinStatus::InvalidArgument)
+        } else {
+            Ok(())
+        }
+    }
+    pub(crate) fn validate_draw(&self, count: u32) -> Result<(), ResinStatus> {
+        if !self.pipeline_bound || !self.graphics || !self.rendering || count == 0 {
+            Err(ResinStatus::InvalidArgument)
+        } else {
+            Ok(())
+        }
     }
 
     fn push_root(&self, root_data: u64) {
@@ -1246,7 +1292,11 @@ fn try_suballocate(
         block: block_index,
         range: range.clone(),
         host,
-        device_address: range.start,
+        device_address: if block.device_address == 0 {
+            0
+        } else {
+            range.start
+        },
         size: bytes,
         buffer: block.buffer,
         buffer_offset: offset,

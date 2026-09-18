@@ -202,6 +202,11 @@ impl Context<'_> {
     }
 
     pub(super) fn physical_load(&mut self, pointee: &Ty, address: Word) -> Result<Word, Error> {
+        if self.resources.is_some() {
+            return Err(Error::unsupported(
+                "resource shaders cannot dereference physical device pointers".into(),
+            ));
+        }
         let layout = crate::layout::layout(self.module, pointee)?;
         let storage_type = self.type_id(pointee, Representation::Buffer)?;
         let pointer_type =
@@ -231,6 +236,11 @@ impl Context<'_> {
         address: Word,
         value: Word,
     ) -> Result<(), Error> {
+        if self.resources.is_some() {
+            return Err(Error::unsupported(
+                "resource shaders cannot dereference physical device pointers".into(),
+            ));
+        }
         let layout = crate::layout::layout(self.module, pointee)?;
         let storage_type = self.type_id(pointee, Representation::Buffer)?;
         let value_type = self.ty(pointee)?;

@@ -2,6 +2,115 @@ mod support;
 
 const EXAMPLE: &str = include_str!("../examples/resource_bindings.resin");
 
+#[cfg(feature = "gpu")]
+#[test]
+fn descriptors_execute_without_buffer_device_addresses() {
+    use resin_runtime::{ResinMemory, ResinStatus, testing};
+    let Some(optimizer) = support::shaders::optimizer() else {
+        return;
+    };
+    let _lock = testing::lock_gpu();
+    let mut gpu = match testing::gpu_without_device_addresses() {
+        Ok(gpu) => gpu,
+        Err(ResinStatus::Unsupported | ResinStatus::VulkanUnavailable) => {
+            assert_ne!(std::env::var("RESIN_REQUIRE_GPU").as_deref(), Ok("1"));
+            return;
+        }
+        Err(error) => panic!("GPU initialization failed: {error:?}"),
+    };
+    let source = r#"
+        export { kernel };
+        import { "$/buffer.resin" };
+        struct Resources { input: Buffer<u32>, output: BufferMut<u32>, bias: u32 }
+        @compute_shader
+        fn kernel(i: u64, resources: Ref<Resources>) {
+            resources.output:store(i, resources.input:load(i) + resources.bias);
+        }
+    "#;
+    let module = support::module(source);
+    let project = support::project::Project::new(&module, None).unwrap();
+    let built = project
+        .build(&support::toolchain::spirv(&optimizer))
+        .unwrap();
+    let shader = &project.generated.shaders()[0];
+    let bytes = std::fs::read(built.path(shader.spirv().file_name().unwrap())).unwrap();
+    assert!(support::shaders::instructions(&bytes, 120).next().is_none());
+    #[repr(C)]
+    struct Binding {
+        offset: u64,
+        reserved: [u64; 2],
+        length: u64,
+    }
+    #[repr(C)]
+    struct Parameters {
+        input: Binding,
+        output: Binding,
+        bias: u32,
+    }
+    // Mirror the compiler's wire layout. Allocations, pipeline, and descriptor
+    // sets stay live until synchronous submission; mapped accesses do not overlap it.
+    unsafe {
+        let pipeline = gpu.create_compute_pipeline(&bytes).unwrap();
+        let input = gpu.malloc(24, 4, ResinMemory::Default).unwrap();
+        let output = gpu.malloc(24, 4, ResinMemory::Default).unwrap();
+        let root = gpu
+            .malloc(size_of::<Parameters>(), 8, ResinMemory::Default)
+            .unwrap();
+        for allocation in [&input, &output, &root] {
+            assert_eq!(allocation.device_pointer(), 0);
+        }
+        input
+            .host_pointer()
+            .cast::<[u32; 6]>()
+            .write([99, 1, 2, 3, 4, 99]);
+        output.host_pointer().cast::<[u32; 6]>().write([99; 6]);
+        let mut commands = gpu.start_command_recording().unwrap();
+        commands.set_pipeline(&pipeline).unwrap();
+        let offsets = testing::bind_resource_buffers(
+            &gpu,
+            &mut commands,
+            &[
+                (&root, 0, size_of::<Parameters>()),
+                (&input, 4, 16),
+                (&output, 4, 16),
+            ],
+        )
+        .unwrap();
+        root.host_pointer().cast::<Parameters>().write(Parameters {
+            input: Binding {
+                offset: offsets[1],
+                reserved: [0; 2],
+                length: 4,
+            },
+            output: Binding {
+                offset: offsets[2],
+                reserved: [0; 2],
+                length: 4,
+            },
+            bias: 10,
+        });
+        commands.dispatch(offsets[0], 1, 1, 1).unwrap();
+        gpu.submit(commands).unwrap();
+        assert_eq!(
+            output.host_pointer().cast::<[u32; 6]>().read(),
+            [99, 11, 12, 13, 14, 99]
+        );
+        drop(pipeline);
+        gpu.free(&root);
+        gpu.free(&output);
+        gpu.free(&input);
+    }
+    let module = support::module(
+        "export { kernel }; @compute_shader fn kernel(i: u64, p: Ptr<u32>) { p.* = u32(i); }",
+    );
+    let project = support::project::Project::new(&module, None).unwrap();
+    let bytes = std::fs::read(project.generated.shaders()[0].unoptimized_spirv()).unwrap();
+    assert!(matches!(
+        unsafe { gpu.create_compute_pipeline(&bytes) },
+        Err(ResinStatus::Unsupported)
+    ));
+}
+
 #[test]
 fn storage_algorithm_runs_on_host_spans() {
     let module = support::module(EXAMPLE);
@@ -21,6 +130,23 @@ fn resource_entry_emits_valid_spirv() {
         let project = support::project::Project::new(&module, None).unwrap();
         for shader in project.generated.shaders() {
             support::shaders::validate(shader.unoptimized_spirv());
+            let bytes = std::fs::read(shader.unoptimized_spirv()).unwrap();
+            assert!(
+                support::shaders::instructions(&bytes, 14).all(|args| args[0] == 0),
+                "descriptor shader must use Logical addressing"
+            );
+            assert!(
+                !support::shaders::instructions(&bytes, 17).any(|args| args[0] == 5347),
+                "unexpected PhysicalStorageBufferAddresses capability"
+            );
+            assert!(
+                support::shaders::instructions(&bytes, 120).next().is_none(),
+                "unexpected OpConvertUToPtr"
+            );
+            assert!(
+                support::shaders::instructions(&bytes, 71).any(|args| args[1] == 33),
+                "missing Binding decoration"
+            );
         }
     }
 }
@@ -39,7 +165,7 @@ fn typed_bindings_keep_offsets_permissions_and_recorded_values() {
         }
         Err(error) => panic!("GPU initialization failed: {error:?}"),
     }
-    for source in [EXAMPLE, BOUNDS] {
+    for source in [EXAMPLE, BOUNDS, SNAPSHOTS, GRAPHICS_EXECUTION] {
         let module = support::module(source);
         let project = support::project::Project::new(&module, Some("main")).unwrap();
         let output = project.run();
@@ -124,6 +250,80 @@ fn main() -> i32 | Err<_> {
     commands:dispatch(pipeline, resources, 1, 1, 1)?;
     commands:submit()?;
     assert(first:load() == f32(0) && second:load() == f32(0) && guard:load() == f32(77));
+    0
+}
+"#;
+
+const SNAPSHOTS: &str = r#"
+export { main };
+import { "$/buffer.resin", "$/gpu.resin" };
+struct Element { byte: u8, value: f32, word: u32 }
+struct Resources { output: BufferMut<Element>, value: f32 }
+@compute_shader
+fn kernel(i: u64, resources: Ref<Resources>) {
+    resources.output:store(i, Element { byte = u8(17), value = resources.value, word = u32(i) });
+}
+fn main() -> i32 | Err<_> {
+    let gpu = gpu_new()?;
+    let output = gpu:alloc::<Element>(42)?;
+    let pipeline = gpu:create_compute_pipeline(kernel)?;
+    let commands = gpu:start_command_recording()?;
+    let mut i: u64 = 0;
+    // More recordings than fit in one descriptor pool, changing both the buffer
+    // subrange and constants. Each iteration drops the binding's original owner.
+    while (i < 40) {
+        let range = output:slice(i + 1, 1);
+        let resources = Resources { output = range:write_buffer(), value = f32(i) };
+        commands:dispatch(pipeline, resources, 1, 1, 1)?;
+        i = i + 1;
+    };
+    commands:submit()?;
+    i = 0;
+    while (i < 40) {
+        let value = output:at(i + 1);
+        let element = value:load();
+        assert(element.byte == u8(17) && element.value == f32(i) && element.word == u32(0));
+        i = i + 1;
+    };
+    0
+}
+"#;
+
+const GRAPHICS_EXECUTION: &str = r#"
+export { main };
+import { "$/buffer.resin", "$/graphics.resin", "$/gpu.resin" };
+struct Resources { colors: Buffer<Color>, observed: BufferMut<u32>, multiplier: f32 }
+@vertex_shader
+fn vertex(index: i32, resources: Ref<Resources>) -> Vertex {
+    let x: f32 = if (index == 1) { 3 } else { -1 };
+    let y: f32 = if (index == 2) { 3 } else { -1 };
+    Vertex { position = Position { x = x, y = y, z = 0, w = 1 }, color = resources.colors:load(0) }
+}
+@fragment_shader
+fn fragment(color: Color, resources: Ref<Resources>) -> Color {
+    resources.observed:store(0, u32(23));
+    Color { r = color.r * resources.multiplier, g = color.g, b = color.b, a = color.a }
+}
+fn main() -> i32 | Err<_> {
+    let gpu = gpu_new()?;
+    let colors = gpu:alloc::<Color>(1)?;
+    let color = colors:at(0);
+    color:store(Color { r = 1, g = 0, b = 0, a = 1 });
+    let observed = gpu:alloc::<u32>(1)?;
+    let resources = Resources { colors = colors:read_buffer(), observed = observed:write_buffer(), multiplier = 1 };
+    let pipeline = gpu:create_graphics_pipeline(vertex, fragment)?;
+    let image = gpu:create_image(1, 1)?;
+    let pixels = gpu:alloc::<u8>(4)?;
+    let commands = gpu:start_command_recording()?;
+    commands:begin_rendering(image, 0, 0, 0, 1)?;
+    commands:draw(pipeline, resources, 3)?;
+    commands:end_rendering()?;
+    commands:copy_image_to_buffer(image, pixels)?;
+    commands:submit()?;
+    let red = pixels:at(0); let green = pixels:at(1); let blue = pixels:at(2); let alpha = pixels:at(3);
+    let written = observed:at(0);
+    assert(written:load() == u32(23));
+    assert(red:load() == u8(255) && green:load() == u8(0) && blue:load() == u8(0) && alpha:load() == u8(255));
     0
 }
 "#;

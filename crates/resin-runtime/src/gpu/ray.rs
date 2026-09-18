@@ -396,6 +396,8 @@ impl ResinGpu {
             }
         };
         let mut pipeline = ResinPipeline {
+            resources: None,
+            layout: self.push_layout,
             device: self.device.clone(),
             handle,
             bind_point: vk::PipelineBindPoint::RAY_TRACING_KHR,

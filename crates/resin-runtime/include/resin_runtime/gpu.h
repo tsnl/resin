@@ -130,12 +130,13 @@ ResinGpuPtr resin_gpu_ptr_offset(
     size_t bytes,
     size_t alignment);
 
-/* Compiler-only projection construction. The root and dependency addresses
-   remain private to generated launch code. No CPU locks are taken until a
+/* Compiler-only projection construction. Resource bindings use descriptors;
+   legacy pointer projections use device addresses. Both remain private to launch code. No CPU locks are taken until a
    projected dispatch or draw is successfully recorded. */
 ResinArc *resin_gpu_projection_new(ResinGpuPtr root);
 void *resin_gpu_projection_root(ResinArc *projection);
-ResinDeviceAddress resin_gpu_projection_buffer(
+/* Append a descriptor binding and return the view-relative byte offset. */
+uint64_t resin_gpu_projection_buffer(
     ResinArc *projection, ResinGpuPtr value, size_t bytes, size_t alignment, uint32_t access);
 ResinDeviceAddress resin_gpu_projection_pointer(
     ResinArc *projection,

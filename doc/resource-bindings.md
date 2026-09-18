@@ -65,16 +65,37 @@ device-only allocations. Ordinary host calls remain available when their operati
 are supported on the CPU; shader entry signatures need not serve as a general CPU
 execution API. Helpers carry the reusable algorithm.
 
-## Current backend and remaining work
+## Vulkan lowering
 
-The first implementation uses the existing Vulkan device-address backend and its
-device requirements. The compiler encodes each buffer binding as an internal
-address slot and logical length in the recorded argument storage, retaining source
-field offsets. Host ownership bytes are not uploaded as usable shader handles.
-Shaders can access a binding only through its checked load/store contract; no
-native pointer is exposed by the binding API.
+Compute, vertex, and fragment entries with `Ref<Resources>` use logical SPIR-V
+addressing and Vulkan storage-buffer descriptors. They require no buffer device
+addresses. The compiler assigns buffer bindings in declaration order, recursively
+through nested records; pipeline creation derives the descriptor layout from the
+compiled shaders. All rooted graphics stages must use the same resource type.
 
-Descriptor-based lowering, texture/sampler bindings, dynamic resource selection,
-and additional backends remain follow-ups in the [resource proposal](gpu-resource-bindings-proposal.md).
-The existing pointer-root API remains available. This implementation makes no
-claim of faster execution or support for devices outside the current Vulkan profile.
+Descriptor set zero contains a separate read-only constants/metadata buffer at
+binding zero, followed by the declared buffers. Recording snapshots plain values
+and each view's byte offset and logical length. Metadata retains the source record's
+field offsets, with reserved ownership bytes zeroed. No host handles or GPU
+addresses are uploaded. A push constant carries the constants buffer's relative
+byte offset, not an address.
+
+A sliced view binds an aligned containing range and carries its relative byte
+offset separately. This preserves arbitrary element-aligned subranges without
+copying data to repair descriptor alignment. Shader loads and stores preserve the
+shared scalar/record layout, including byte fields. The runtime checks descriptor
+count and range limits against the selected device and reports `unsupported` when
+it cannot represent a binding. There is no silent device-address fallback.
+
+Each recorded dispatch or draw gets an immutable descriptor set. Pools amortize
+allocation across recordings; sets and layouts stay alive through completion or
+cancellation, along with the referenced allocations. Changing a host resource
+record after recording cannot alter an earlier command.
+
+Texture/sampler bindings, dynamic resource selection, resource bundles for ray
+stages, and additional backends remain follow-ups in the
+[resource proposal](gpu-resource-bindings-proposal.md). Resource references must
+select a statically known binding; ordinary element indices remain dynamic.
+The legacy pointer-root API remains available and requires buffer device addresses.
+Other [GPU requirements](shaders.md#gpu-requirements), including 64-bit integer
+support, remain unchanged. No performance improvement is claimed without measurements.

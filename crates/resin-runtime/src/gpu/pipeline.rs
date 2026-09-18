@@ -5,6 +5,8 @@ use ash::{Device, vk};
 use super::{COLOR_FORMAT, ResinGpu, ResinStatus, vk_status};
 
 pub struct ResinPipeline {
+    pub(super) resources: Option<std::rc::Rc<super::descriptors::Layout>>,
+    pub(super) layout: vk::PipelineLayout,
     pub(super) ray: Option<super::ray::Dispatch>,
     pub(super) device: Device,
     pub(super) handle: vk::Pipeline,
@@ -18,6 +20,8 @@ impl ResinGpu {
     /// # Safety
     /// The SPIR-V must be valid for this device and the runtime's entry point and push-constant interface. The GPU must outlive the pipeline.
     pub unsafe fn create_compute_pipeline(&self, spv: &[u8]) -> Result<ResinPipeline, ResinStatus> {
+        let resources = super::descriptors::Layout::create(self, &[(spv, true)])?;
+        let layout = resources.as_ref().map_or(self.push_layout, |r| r.pipeline);
         let shader = ShaderModule::create(&self.device, spv)?;
         let width = self.compute_workgroup_size().to_ne_bytes();
         let entry = vk::SpecializationMapEntry::default()
@@ -33,7 +37,7 @@ impl ResinGpu {
                     .stage(vk::ShaderStageFlags::COMPUTE)
                     .specialization_info(&specialization),
             )
-            .layout(self.push_layout);
+            .layout(layout);
         let result = unsafe {
             self.device.create_compute_pipelines(
                 vk::PipelineCache::null(),
@@ -41,7 +45,13 @@ impl ResinGpu {
                 None,
             )
         };
-        ResinPipeline::create(&self.device, vk::PipelineBindPoint::COMPUTE, result)
+        ResinPipeline::create(
+            &self.device,
+            vk::PipelineBindPoint::COMPUTE,
+            result,
+            resources,
+            layout,
+        )
     }
 
     /// # Safety
@@ -51,6 +61,14 @@ impl ResinGpu {
         vertex_spv: &[u8],
         fragment_spv: &[u8],
     ) -> Result<ResinPipeline, ResinStatus> {
+        let resources = super::descriptors::Layout::create(
+            self,
+            &[
+                (vertex_spv, self.vertex_storage_writes),
+                (fragment_spv, self.fragment_storage_writes),
+            ],
+        )?;
+        let layout = resources.as_ref().map_or(self.push_layout, |r| r.pipeline);
         let vertex = ShaderModule::create(&self.device, vertex_spv)?;
         let fragment = ShaderModule::create(&self.device, fragment_spv)?;
         let stages = [
@@ -87,7 +105,7 @@ impl ResinGpu {
             .multisample_state(&multisample)
             .color_blend_state(&blend)
             .dynamic_state(&dynamic)
-            .layout(self.push_layout)
+            .layout(layout)
             .push_next(&mut rendering);
         let result = unsafe {
             self.device.create_graphics_pipelines(
@@ -96,7 +114,13 @@ impl ResinGpu {
                 None,
             )
         };
-        ResinPipeline::create(&self.device, vk::PipelineBindPoint::GRAPHICS, result)
+        ResinPipeline::create(
+            &self.device,
+            vk::PipelineBindPoint::GRAPHICS,
+            result,
+            resources,
+            layout,
+        )
     }
 }
 
@@ -105,9 +129,13 @@ impl ResinPipeline {
         device: &Device,
         bind_point: vk::PipelineBindPoint,
         result: Result<Vec<vk::Pipeline>, (Vec<vk::Pipeline>, vk::Result)>,
+        resources: Option<std::rc::Rc<super::descriptors::Layout>>,
+        layout: vk::PipelineLayout,
     ) -> Result<Self, ResinStatus> {
         match result {
             Ok(pipelines) => Ok(Self {
+                resources,
+                layout,
                 ray: None,
                 device: device.clone(),
                 handle: pipelines[0],
@@ -159,7 +187,7 @@ impl Drop for ShaderModule<'_> {
     }
 }
 
-fn spirv_words(bytes: &[u8]) -> Result<Vec<u32>, ResinStatus> {
+pub(super) fn spirv_words(bytes: &[u8]) -> Result<Vec<u32>, ResinStatus> {
     if bytes.len() < 20 || !bytes.len().is_multiple_of(4) {
         return Err(ResinStatus::InvalidArgument);
     }

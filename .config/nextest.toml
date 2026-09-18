@@ -5,12 +5,12 @@ gpu-ci = { max-threads = 2 }
 [[profile.default.overrides]]
 # Keep GPU fixture compilation in flight while testing::lock_gpu() serializes
 # device access. The global worker limit also applies to this group.
-filter = 'binary(gpu_backend) | binary(gpu_pointers) | binary(fragment_discard) | binary(spirv_execution) | binary(window_backend) | package(resin-runtime) | (binary(benchmarks) & test(gpu_workloads))'
+filter = 'binary(resource_bindings) | binary(gpu_backend) | binary(gpu_pointers) | binary(fragment_discard) | binary(spirv_execution) | binary(window_backend) | package(resin-runtime) | (binary(benchmarks) & test(gpu_workloads))'
 test-group = 'gpu'
 # Start GPU work early and overlap it with the independent host tests.
 priority = 100
 
 [[profile.ci.overrides]]
 # Hosted runners use software Vulkan and have fewer CPU workers to spare.
-filter = 'binary(gpu_backend) | binary(gpu_pointers) | binary(fragment_discard) | binary(spirv_execution) | binary(window_backend) | package(resin-runtime) | (binary(benchmarks) & test(gpu_workloads))'
+filter = 'binary(resource_bindings) | binary(gpu_backend) | binary(gpu_pointers) | binary(fragment_discard) | binary(spirv_execution) | binary(window_backend) | package(resin-runtime) | (binary(benchmarks) & test(gpu_workloads))'
 test-group = 'gpu-ci'

@@ -133,7 +133,9 @@ that the GPU may still use.
 See [lifetime rules](lifetimes.md).
 
 The unsafe [native C ABI](../crates/resin-runtime/include/resin_runtime/gpu.h)
-retains its explicit native handles and device addresses. The Resin API obtains
+retains its explicit native handles and optional device addresses.
+[Resource records](resource-bindings.md) use descriptors; legacy pointer-root
+shaders require device-address support. The Resin API obtains
 shader addresses through compiler projection.
 
 The GPU module implements pipeline creation and recording through explicitly

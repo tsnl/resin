@@ -1,6 +1,6 @@
 # Proposal: explicit GPU resource bindings
 
-**Status:** Direction adopted; initial typed-buffer implementation available.
+**Status:** Typed buffers and Vulkan descriptor lowering implemented for compute and graphics.
 
 **Date:** 2026-09-17.
 
@@ -16,8 +16,8 @@ mechanisms remain open.
 The [typed resource bindings guide](resource-bindings.md) documents the implemented
 API and its executable CPU/GPU example. It supplies read-only and writable buffer
 views, one borrowed resource record, bounds behavior, and recording guarantees.
-The initial lowering uses Vulkan device addresses; descriptor-based lowering and
-the broader resource kinds described below remain future work. Names and syntax
+The implementation uses Vulkan storage-buffer descriptors and a separate constants
+channel, with logical SPIR-V addressing. Broader resource kinds remain future work. Names and syntax
 in the design pseudocode below are illustrative; use the guide for current APIs.
 
 ## Decision
@@ -44,9 +44,9 @@ The language concept is a resource bundle, not a literal Vulkan descriptor set.
 Descriptor sets are an initial backend implementation, not a requirement imposed on
 every target.
 
-## Where Resin is today
+## Baseline before this change
 
-The current model already imposes important restrictions:
+The pointer-root model imposed these restrictions:
 
 - Host `GpuPtr<T>` and `GpuSpan<T>` are owning views over an opaque `GpuView`.
   Shader code instead uses `Ptr<T>` and `Span<T>`.
@@ -56,8 +56,9 @@ The current model already imposes important restrictions:
 - Projection handles the launch record, including nested value records. It
   **does not recursively traverse objects reached through buffer contents**.
   GPU buffer elements already reject pointers, spans, managed owners, and drop hooks.
-- The current Vulkan profile requires buffer device addresses and 64-bit shader
-  integers. Decorated shader entries are currently host-callable.
+- The baseline Vulkan profile required buffer device addresses and 64-bit shader
+  integers. Decorated shader entries were host-callable. Resource entries now avoid
+  device addresses; the legacy pointer ABI still requires them.
 
 See [GPU buffers](gpu-buffers.md), [shader requirements](shaders.md#gpu-requirements),
 and the [native GPU ABI](../crates/resin-runtime/include/resin_runtime/gpu.h).

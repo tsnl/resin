@@ -294,6 +294,7 @@ impl Context {
             return Err("pipeline creation requires direct shader declarations".into());
         }
         let mut root = Type::None;
+        let mut resources = None;
         for shader in shaders {
             let Type::Function { params, .. } = shader else {
                 return Err("pipeline creation requires decorated shader declarations".into());
@@ -306,6 +307,14 @@ impl Context {
                 },
             ) = params.get(1)
             {
+                let descriptor = matches!(params[1], Type::Reference { .. });
+                if resources.is_some_and(|previous| previous != descriptor) {
+                    return Err(
+                        "pipeline stages must agree on descriptor resources versus pointer roots"
+                            .into(),
+                    );
+                }
+                resources = Some(descriptor);
                 if root != Type::None && root != **pointee {
                     return Err("pipeline shaders must use the same root type".into());
                 }

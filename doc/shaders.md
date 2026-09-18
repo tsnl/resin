@@ -200,14 +200,22 @@ The runtime uses conventional Vulkan compute and graphics pipelines, with dynami
 and a dynamic viewport/scissor. Graphics currently target one RGBA8 UNORM color attachment,
 triangle lists, one sample, and no blending or depth/stencil testing.
 
-A Vulkan 1.3 device must support graphics and compute, buffer device addresses, 64-bit shader
-integers, timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
+A Vulkan 1.3 device must support graphics and compute, 64-bit shader integers,
+timeline semaphores, synchronization2, dynamic rendering, and maintenance4.
+[Resource records](resource-bindings.md) use storage-buffer descriptors and logical
+addressing. Buffer device addresses are enabled when supported and are required
+only for legacy pointer-root shaders and ray tracing; creating such a pipeline
+without that feature returns `unsupported`.
 The runtime also enables `shaderTerminateInvocation`, a required Vulkan 1.3 feature,
 for optional fragment returns.
 `VK_KHR_maintenance8` and its `maintenance8` feature are also required and enabled
 when creating the device. This makes signed shader remainder well-defined for
 negative operands. Devices missing the extension or feature are reported as
 unsuitable; GPU creation returns `unsupported` if no suitable device is available.
+Storage-buffer writes in vertex and fragment shaders additionally need the
+corresponding `vertexPipelineStoresAndAtomics` or `fragmentStoresAndAtomics` feature.
+These are enabled when supported; descriptor pipeline creation returns `unsupported`
+if a shader needs a missing write feature.
 Shader objects, map_memory2, maintenance5, and maintenance6 are not required. Optional memory-priority and pageable-memory features are enabled when supported.
 Shader capabilities are limited to the profile Resin emits; externally supplied SPIR-V must
 fit that profile too. The emitted byte profile additionally enables supported `storageBuffer8BitAccess` and `shaderInt8` features.

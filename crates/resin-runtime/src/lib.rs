@@ -1,7 +1,8 @@
 //! Host, windowing, and Vulkan runtime, exposed through C and unsafe Rust APIs.
 //!
-//! CPU-visible allocations have mapped host pointers and GPU addresses.
-//! Shaders receive a 64-bit root address as a push constant.
+//! Resource shaders use storage-buffer descriptors and a constants buffer, with
+//! its relative byte offset in push constants. Legacy pointer-root shaders require
+//! optional buffer device addresses. CPU-visible allocations have mapped host pointers.
 //!
 //! A GPU must outlive its resources; recorded resources must outlive completion
 //! or cancellation. GPU and child-object operations require external synchronization.
@@ -86,6 +87,35 @@ pub mod testing {
 
     pub struct GpuLock {
         _file: File,
+    }
+
+    /// Create the descriptor conformance device without enabling buffer addresses.
+    pub fn gpu_without_device_addresses() -> Result<crate::ResinGpu, crate::ResinStatus> {
+        crate::ResinGpu::create_without_device_addresses()
+    }
+
+    /// Bind raw allocations for backend conformance tests, returning offsets into
+    /// the aligned descriptors. Production Resin code uses owning projections.
+    ///
+    /// # Safety
+    /// All allocations must belong to this GPU and remain live through completion;
+    /// accesses and command recording must be externally synchronized.
+    pub unsafe fn bind_resource_buffers(
+        gpu: &crate::ResinGpu,
+        commands: &mut crate::ResinCommandBuffer,
+        buffers: &[(&crate::ResinAllocation, usize, usize)],
+    ) -> Result<Vec<u64>, crate::ResinStatus> {
+        let ranges = buffers
+            .iter()
+            .map(|(allocation, offset, bytes)| gpu.descriptor_range(allocation, *offset, *bytes))
+            .collect::<Result<Vec<_>, _>>()?;
+        commands.bind_resources(
+            &ranges
+                .iter()
+                .map(|(binding, _)| *binding)
+                .collect::<Vec<_>>(),
+        )?;
+        Ok(ranges.iter().map(|(_, offset)| *offset).collect())
     }
 
     /// Exclusive lock shared by unit and integration GPU tests.
@@ -230,7 +260,7 @@ pub unsafe extern "C" fn resin_gpu_projection_pointer(
     unsafe { gpu_view::projection_pointer(projection, value, bytes, alignment) }
 }
 
-/// Encode and retain an explicitly qualified buffer binding.
+/// Record and retain a descriptor buffer binding, returning its relative byte offset.
 ///
 /// # Safety
 /// As for `resin_gpu_projection_pointer`: the projection is exclusively held
@@ -242,7 +272,7 @@ pub unsafe extern "C" fn resin_gpu_projection_buffer(
     bytes: usize,
     alignment: usize,
     access: u32,
-) -> ResinDeviceAddress {
+) -> u64 {
     unsafe { gpu_view::projection_buffer(projection, value, bytes, alignment, access) }
 }
 

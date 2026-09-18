@@ -20,7 +20,9 @@ struct AllocationOwner {
 }
 
 struct ProjectionOwner {
+    error: Option<ResinStatus>,
     root: ResinGpuPtr,
+    bindings: Vec<ash::vk::DescriptorBufferInfo>,
     dependencies: Vec<*mut ResinArc>,
 }
 
@@ -206,7 +208,7 @@ unsafe fn checked_offset(
     check_range(offset, bytes, owner.bytes)?;
     let address = owner
         .allocation
-        .device_pointer()
+        .buffer_offset()
         .checked_add(offset as u64)
         .ok_or("GPU pointer offset overflow")?;
     check_alignment(address as usize, alignment)?;
@@ -252,7 +254,9 @@ pub(crate) unsafe fn projection_new(root: ResinGpuPtr) -> *mut ResinArc {
         resin_arc_data(owner)
             .cast::<ProjectionOwner>()
             .write(ProjectionOwner {
+                error: None,
                 root,
+                bindings: Vec::new(),
                 dependencies: Vec::new(),
             });
     }
@@ -298,13 +302,13 @@ unsafe fn checked_device_pointer(
     }
 }
 
-unsafe fn checked_device_access(
+unsafe fn checked_binding_owner<'a>(
     value: ResinGpuPtr,
     bytes: usize,
     alignment: usize,
     gpu: *mut ResinGpu,
     access: u32,
-) -> Result<u64, &'static str> {
+) -> Result<&'a AllocationOwner, &'static str> {
     let owner = unsafe { allocation_owner(value) }?;
     if owner.gpu != gpu {
         return Err("GPU pointer belongs to a different device");
@@ -315,6 +319,26 @@ unsafe fn checked_device_access(
         return Err("invalid shader binding access");
     }
     check_access(value.access, access)?;
+    check_alignment(
+        (owner.allocation.buffer_offset() as usize)
+            .checked_add(value.offset)
+            .ok_or("GPU binding offset overflow")?,
+        alignment,
+    )?;
+    Ok(owner)
+}
+
+unsafe fn checked_device_access(
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    gpu: *mut ResinGpu,
+    access: u32,
+) -> Result<u64, &'static str> {
+    let owner = unsafe { checked_binding_owner(value, bytes, alignment, gpu, access) }?;
+    if owner.allocation.device_pointer() == 0 {
+        return Err("buffer device addresses are not enabled");
+    }
     let address = owner
         .allocation
         .device_pointer()
@@ -368,13 +392,28 @@ pub(crate) unsafe fn projection_pointer(
 }
 
 unsafe fn projected_root(
-    commands: &ResinCommandBuffer,
+    commands: &mut ResinCommandBuffer,
     projection: &ProjectionOwner,
 ) -> Result<u64, ResinStatus> {
+    if let Some(error) = projection.error {
+        return Err(error);
+    }
     let owner =
         unsafe { allocation_owner(projection.root) }.map_err(|_| ResinStatus::InvalidArgument)?;
     if !commands.belongs_to_gpu(unsafe { &*owner.gpu }) {
         return Err(ResinStatus::InvalidArgument);
+    }
+    if commands.uses_descriptors() {
+        let (constants, offset) = unsafe { &*owner.gpu }.descriptor_range(
+            &owner.allocation,
+            projection.root.offset,
+            owner.bytes - projection.root.offset,
+        )?;
+        let bindings = std::iter::once(constants)
+            .chain(projection.bindings.iter().copied())
+            .collect::<Vec<_>>();
+        commands.bind_resources(&bindings)?;
+        return Ok(offset);
     }
     Ok(owner.allocation.device_pointer() + projection.root.offset as u64)
 }
@@ -416,6 +455,9 @@ pub(crate) unsafe fn projected_dispatch(
     if projection.is_null() {
         return ResinStatus::InvalidArgument;
     }
+    if let Err(status) = commands.validate_dispatch() {
+        return status;
+    }
     let value = unsafe { projection_owner(projection) };
     let result = unsafe { projected_root(commands, value) }.and_then(|root| unsafe {
         commands.dispatch(root, group_count_x, group_count_y, group_count_z)
@@ -437,6 +479,9 @@ pub(crate) unsafe fn projected_draw(
     };
     if projection.is_null() {
         return ResinStatus::InvalidArgument;
+    }
+    if let Err(status) = commands.validate_draw(vertex_count) {
+        return status;
     }
     let value = unsafe { projection_owner(projection) };
     let result = unsafe { projected_root(commands, value) }
@@ -490,16 +535,25 @@ pub(crate) unsafe fn projection_buffer(
     alignment: usize,
     access: u32,
 ) -> u64 {
-    unsafe {
-        checked_projection_binding(
-            projection_owner(projection),
-            value,
-            bytes,
-            alignment,
-            access,
-        )
+    let projection = unsafe { projection_owner(projection) };
+    let root = unsafe { allocation_owner(projection.root) }
+        .unwrap_or_else(|message| crate::host::fail(message));
+    let owner = unsafe { checked_binding_owner(value, bytes, alignment, root.gpu, access) }
+        .unwrap_or_else(|message| crate::host::fail(message));
+    let (binding, offset) =
+        match unsafe { &*root.gpu }.descriptor_range(&owner.allocation, value.offset, bytes) {
+            Ok(range) => range,
+            Err(error) => {
+                projection.error = Some(error);
+                return 0;
+            }
+        };
+    if value.owner != projection.root.owner && !projection.dependencies.contains(&value.owner) {
+        unsafe { resin_arc_retain(value.owner) };
+        projection.dependencies.push(value.owner);
     }
-    .unwrap_or_else(|message| crate::host::fail(message))
+    projection.bindings.push(binding);
+    offset
 }
 
 #[cfg(test)]
@@ -516,8 +570,17 @@ mod tests {
 
     impl TestGpu {
         fn new() -> Option<Self> {
+            Self::with_device_addresses(true)
+        }
+
+        fn with_device_addresses(addresses: bool) -> Option<Self> {
             let lock = crate::testing::lock_gpu();
-            let gpu = match ResinGpu::create() {
+            let device = if addresses {
+                ResinGpu::create()
+            } else {
+                ResinGpu::create_without_device_addresses()
+            };
+            let gpu = match device {
                 Ok(gpu) => Box::into_raw(Box::new(gpu)),
                 Err(ResinStatus::VulkanUnavailable | ResinStatus::Unsupported) => {
                     assert!(
@@ -564,6 +627,39 @@ mod tests {
     impl Drop for TestGpu {
         fn drop(&mut self) {
             unsafe { resin_arc_release(self.owner) };
+        }
+    }
+
+    #[test]
+    fn views_and_projection_work_without_device_addresses() {
+        let Some(gpu) = TestGpu::with_device_addresses(false) else {
+            return;
+        };
+        unsafe {
+            let value = gpu.allocate(16, ResinMemory::Default);
+            let root = gpu.allocate(32, ResinMemory::Default);
+            let interior = checked_offset(value, 4, 12, 4).unwrap();
+            checked_host(interior, 4, 4, RESIN_GPU_ACCESS_WRITE)
+                .unwrap()
+                .cast::<u32>()
+                .write(42);
+            assert_eq!(
+                checked_host(interior, 4, 4, RESIN_GPU_ACCESS_READ)
+                    .unwrap()
+                    .cast::<u32>()
+                    .read(),
+                42
+            );
+            assert!(
+                checked_device_access(interior, 12, 4, gpu.gpu, RESIN_GPU_ACCESS_READ).is_err()
+            );
+            let projection = projection_new(root);
+            projection_buffer(projection, interior, 12, 4, RESIN_GPU_ACCESS_READ);
+            assert_eq!(projection_owner(projection).bindings.len(), 1);
+            assert_eq!(projection_owner(projection).error, None);
+            resin_arc_release(projection);
+            resin_arc_release(root.owner);
+            resin_arc_release(value.owner);
         }
     }
 

@@ -23,6 +23,7 @@ pub(super) struct Slot {
     pub ty: Ty,
     pub id: Word,
     pub local: Option<LocalAddress>,
+    pub resource: Option<usize>,
 }
 
 impl Slot {
@@ -31,20 +32,20 @@ impl Slot {
             ty,
             id,
             local: None,
+            resource: None,
         }
     }
 
     pub fn symbolic(&self) -> bool {
-        self.local.is_some() || matches!(self.ty, Ty::Function { .. })
+        self.local.is_some() || self.resource.is_some() || matches!(self.ty, Ty::Function { .. })
     }
 }
 
 pub(super) fn agree(left: &[Slot], right: &[Slot]) -> Result<(), Error> {
-    if left
-        .iter()
-        .zip(right)
-        .any(|(a, b)| (a.symbolic() || b.symbolic()) && (a.local != b.local || a.id != b.id))
-    {
+    if left.iter().zip(right).any(|(a, b)| {
+        (a.symbolic() || b.symbolic())
+            && (a.local != b.local || a.resource != b.resource || a.id != b.id)
+    }) {
         return Err(Error::unsupported(
             "shader cannot merge distinct local addresses or function values".into(),
         ));
@@ -53,6 +54,24 @@ pub(super) fn agree(left: &[Slot], right: &[Slot]) -> Result<(), Error> {
 }
 
 pub(super) fn check(instruction: &Instr, args: &[Slot]) -> Result<(), Error> {
+    if args.iter().enumerate().any(|(i, arg)| {
+        arg.resource.is_some()
+            && !(i == 0
+                && matches!(
+                    instruction,
+                    Instr::Load
+                        | Instr::TransferLoad
+                        | Instr::AccessStatic { .. }
+                        | Instr::ReadOnly
+                        | Instr::GpuBufferLoad { .. }
+                        | Instr::GpuBufferStore
+                ))
+            && !matches!(instruction, Instr::Discard)
+    }) {
+        return Err(Error::unsupported(
+            "resource bindings must remain statically selected borrowed fields".into(),
+        ));
+    }
     if args
         .iter()
         .enumerate()

@@ -228,8 +228,11 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   capabilities, not buffer elements. Validate the whole resource schema during
   LIR construction and verification, even for unused fields. Shader buffer loads
   return zero out of range; stores do nothing. Preserve allocation retention,
-  permissions, subranges, and recording snapshots. The initial Vulkan lowering
-  uses bounded device-address encoding; descriptor lowering remains separate.
+  permissions, subranges, and recording snapshots. Resource compute/graphics shaders
+  use logical SPIR-V addressing, storage-buffer descriptors, and a separate constants
+  channel. Bind aligned containing ranges and carry view-relative offsets. Retain
+  immutable descriptor sets with their recordings; never fall back to device addresses.
+  Device addresses remain optional for the legacy pointer-root ABI and ray tracing.
 
 - Target 64-bit Linux, macOS, and Windows (MSVC with LLVM Clang for emitted C).
   Keep host builds independent of a Vulkan SDK or GPU. GPU execution still requires the

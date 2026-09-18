@@ -17,6 +17,12 @@ pub(super) enum Index {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum Parameter {
+    Local { local: LocalParameter },
+    Resource { offset: usize },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct LocalParameter {
     pub root: Ty,
     pub indices: Vec<Index>,
@@ -25,7 +31,32 @@ pub(super) struct LocalParameter {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct Signature {
     function: usize,
-    parameters: Vec<Option<LocalParameter>>,
+    parameters: Vec<Option<Parameter>>,
+}
+
+impl Parameter {
+    pub(super) fn types(&self, context: &mut Context<'_>) -> Result<Vec<Word>, Error> {
+        match self {
+            Self::Local { local } => local.types(context),
+            Self::Resource { .. } => Ok(vec![]),
+        }
+    }
+    pub(super) fn argument(
+        &self,
+        context: &mut Context<'_>,
+        args: &mut impl Iterator<Item = Word>,
+        ty: Ty,
+    ) -> Slot {
+        match self {
+            Self::Local { local } => local.argument(context, args, ty),
+            Self::Resource { offset } => Slot {
+                ty,
+                id: 0,
+                local: None,
+                resource: Some(*offset),
+            },
+        }
+    }
 }
 
 impl LocalParameter {
@@ -61,6 +92,7 @@ impl LocalParameter {
         Slot {
             ty,
             id: root,
+            resource: None,
             local: Some(LocalAddress {
                 root,
                 root_type: self.root.clone(),
@@ -85,16 +117,21 @@ pub(super) fn local_call(
         parameters: args[1..]
             .iter()
             .map(|arg| {
-                arg.local.as_ref().map(|local| LocalParameter {
-                    root: local.root_type.clone(),
-                    indices: local
-                        .indices
-                        .iter()
-                        .map(|index| match index {
-                            LocalIndex::Static { index } => Index::Static { index: *index },
-                            LocalIndex::Dynamic { ty, .. } => Index::Dynamic { ty: ty.clone() },
-                        })
-                        .collect(),
+                if let Some(offset) = arg.resource {
+                    return Some(Parameter::Resource { offset });
+                }
+                arg.local.as_ref().map(|local| Parameter::Local {
+                    local: LocalParameter {
+                        root: local.root_type.clone(),
+                        indices: local
+                            .indices
+                            .iter()
+                            .map(|index| match index {
+                                LocalIndex::Static { index } => Index::Static { index: *index },
+                                LocalIndex::Dynamic { ty, .. } => Index::Dynamic { ty: ty.clone() },
+                            })
+                            .collect(),
+                    },
                 })
             })
             .collect(),
@@ -102,6 +139,9 @@ pub(super) fn local_call(
     let callee = specialize(context, signature)?;
     let mut arguments = Vec::new();
     for arg in &args[1..] {
+        if arg.resource.is_some() {
+            continue;
+        }
         if let Some(local) = &arg.local {
             arguments.push(local.root);
             for index in &local.indices {

@@ -29,15 +29,38 @@ pub(super) fn lower(
     context.builder.name(wrapper, "main");
     context.builder.begin_block(None).map_err(build_error)?;
     let inputs = variables.arguments(context, &interface)?;
-    let result_type = context.ty(result)?;
-    let output = context
-        .builder
-        .function_call(result_type, None, context.functions[entry.index()], inputs)
-        .map_err(build_error)?;
-    let may_fail = context.function_may_fail(context.functions[entry.index()]);
+    let (output, callee) = if context.resources.is_some() {
+        let args = [
+            super::symbols::Slot::value(function.ty().unwrap(), context.functions[entry.index()]),
+            super::symbols::Slot::value(params[0].clone(), inputs[0]),
+            super::symbols::Slot {
+                ty: params[1].clone(),
+                id: 0,
+                local: None,
+                resource: Some(0),
+            },
+        ];
+        let (output, callee) = super::calls::local_call(context, &args, result)?;
+        (output.id, callee)
+    } else {
+        let result_type = context.ty(result)?;
+        let callee = context.functions[entry.index()];
+        let output = context
+            .builder
+            .function_call(result_type, None, callee, inputs)
+            .map_err(build_error)?;
+        (output, callee)
+    };
+    let may_fail = context.function_may_fail(callee);
     variables.finish(context, &interface, result, output, may_fail)?;
     context.builder.ret().map_err(build_error)?;
     context.builder.end_function().map_err(build_error)?;
+    let mut variables = variables;
+    if let Some(resources) = &context.resources {
+        variables
+            .interfaces
+            .extend(resources.variables.values().copied());
+    }
     declare_entry(context, wrapper, stage, &variables);
     Ok(())
 }
@@ -147,6 +170,11 @@ impl Variables {
     }
 
     fn push_constant(&mut self, context: &mut Context<'_>) -> Result<(), Error> {
+        if let Some(resources) = &context.resources {
+            self.root = Some(resources.push);
+            self.interfaces.push(resources.push);
+            return Ok(());
+        }
         let word = context.ty(&Ty::UInt64)?;
         let structure = context.builder.id();
         context.builder.type_struct_id(Some(structure), [word]);
