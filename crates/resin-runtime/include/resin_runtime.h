@@ -7,4 +7,5 @@
 #include "resin_runtime/console.h"
 #include "resin_runtime/gpu.h"
 #include "resin_runtime/image.h"
+#include "resin_runtime/gltf.h"
 #include "resin_runtime/window.h"

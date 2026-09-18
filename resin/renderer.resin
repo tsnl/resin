@@ -1,0 +1,127 @@
+//! Reusable rendering primitives. Callers own images, GPU buffers, shader roots,
+//! pipelines, command submission, and the integrator that combines these pieces.
+//! Import individual renderer modules when only scene, lighting, or BSDF math is
+//! needed. SVGF is separate middleware in $/svgf.resin. examples/arris.resin shows
+//! a complete composition with raster primary visibility and RT secondary rays.
+export { SceneData, ShaderScene, DeviceScene, upload_scene, scene_acceleration, upload, Surface, surface_at, accepts_surface, Environment, ShaderEnvironment, DeviceEnvironment, environment, environment_value, environment_pdf, environment_sample, DirectionSample, random, BsdfSample, bsdf_sample, bsdf_value, bsdf_pdf, power_heuristic, Camera, camera, camera_ray, RasterRoot, primary_vertex, primary_fragment, Hit, miss_hit, closest_hit, trace_surface, orient_surface, offset_ray_origin, ToneRoot, tone_map };
+import { "renderer/scene.resin", "renderer/environment.resin", "renderer/brdf.resin", "gpu.resin", "graphics.resin", "linalg.resin", "math.resin", "span.resin" };
+
+/// Pinhole camera, looking down local -Z. Transform is rigid camera-to-world.
+struct Camera { transform: Mat4, focal_length: f32, sensor_size: Vec2, near: f32, far: f32 }
+fn camera(transform: Mat4, aspect: f32) -> Camera {
+	Camera { transform = transform, focal_length = 0.035, sensor_size = vec2(0.036, 0.036 / aspect), near = 0.01, far = 10000 }
+}
+/// Root for primary_vertex/primary_fragment. Use DeviceScene on the host and
+/// ShaderScene in shaders. Render into RGBA32F with D32 LESS depth testing and a
+/// zero clear. Result: (triangle + 1, barycentric u, barycentric v, 1), or zero.
+/// Vertices form a world-space triangle list with fewer than 2^24 triangles.
+struct RasterRoot<S> { scene: S, view_projection: Mat4, eye: Vec3 }
+@vertex_shader
+fn primary_vertex(index: i32, root: Ptr<RasterRoot<ShaderScene>>) -> Vertex {
+	let vertex = root.scene.vertices:at(u64(index));
+	let clip = mul(root.view_projection, vec4(vertex.position.x, vertex.position.y, vertex.position.z, 1));
+	Vertex {
+		position = Position { x = clip.x, y = clip.y, z = clip.z, w = clip.w },
+		color = Color {
+			r = f32((index / 3) % 4096),
+			g = if (index % 3 == 1) {
+				f32(1)
+			} else {
+				f32(0)
+			},
+			b = if (index % 3 == 2) {
+				f32(1)
+			} else {
+				f32(0)
+			},
+			a = f32((index / 3) / 4096)
+		}
+	}
+}
+@fragment_shader
+fn primary_fragment(weights: Color, root: Ptr<RasterRoot<ShaderScene>>) -> Color | None {
+	// Two 12-bit components keep ID interpolation far from float rounding limits.
+	let triangle = u32(weights.r + 0.5) + u32(weights.a + 0.5) * 4096;
+	let surface = surface_at(root.scene, triangle, weights.g, weights.b);
+	if (!accepts_surface(surface) || ((surface.flags & 4) == 0 && dot(surface.geometric, sub(root.eye, surface.position)) <= 0)) {
+		None
+	} else {
+		Color { r = f32(triangle) + 1, g = weights.g, b = weights.b, a = 1 }
+	}
+}
+/// Triangle index and perspective-correct barycentrics; ~u32(0) denotes a miss.
+struct Hit { distance: f32, triangle: u32, u: f32, v: f32 }
+/// Miss payload for a pipeline whose ray-generation shader calls trace_surface.
+fn miss_hit() -> Hit {
+	Hit { distance = 0, triangle = ~u32(0), u = 0, v = 0 }
+}
+/// Call from the pipeline's closest-hit entry. Geometry must use the same world-
+/// space triangle order as ShaderScene, with one identity-transformed instance.
+fn closest_hit() -> Hit {
+	let h = ray_hit_info();
+	Hit { distance = h.0, triangle = h.1, u = h.3, v = h.4 }
+}
+/// Trace within [minimum, maximum], skipping backfaces and rejected alpha coverage.
+/// Direction is normalized; bounds are finite, nonnegative world-space distances.
+/// Empty intervals miss. MASK rejection does not spend a bounce. BLEND uses
+/// stochastic coverage and advances the supplied RNG.
+/// Call from ray generation with Hit payloads, miss_hit, and closest_hit entries.
+/// A miss returns triangle = ~u32(0). No command submission or path integration.
+fn trace_surface(scene: ShaderScene, origin: Vec3, direction: Vec3, minimum: f32, maximum: f32, state: RefMut<u32>) -> Hit {
+	let mut next = minimum;
+	while (next < maximum) {
+		let hit = trace_ray(origin.x, origin.y, origin.z, direction.x, direction.y, direction.z, next, maximum, miss_hit());
+		if (hit.triangle == ~u32(0)) {
+			return hit;
+		};
+		let surface = surface_at(scene, hit.triangle, hit.u, hit.v);
+		let front = (surface.flags & 4) != 0 || dot(surface.geometric, direction) < 0;
+		let coverage = (surface.flags & 2) == 0 || random(state) < surface.alpha;
+		if (front && accepts_surface(surface) && coverage) {
+			return hit;
+		};
+		// Masked intersections advance traversal without consuming a path bounce.
+		next = max(hit.distance + 0.0001, hit.distance * 1.00001);
+	};
+	Hit { distance = 0, triangle = ~u32(0), u = 0, v = 0 }
+}
+/// Face a two-sided surface toward the outgoing direction for BSDF evaluation.
+fn orient_surface(surface: Surface, outgoing: Vec3) -> Surface {
+	let mut result = surface;
+	if (dot(result.geometric, outgoing) < 0) {
+		result.geometric = mul(result.geometric, -1);
+		result.normal = mul(result.normal, -1);
+	};
+	if (dot(result.normal, outgoing) <= 0) {
+		result.normal = result.geometric;
+	};
+	result
+}
+/// Offset along the oriented geometric normal to avoid self-intersection.
+fn offset_ray_origin(surface: Surface) -> Vec3 {
+	add(surface.position, mul(surface.geometric, 0.0001 * max(1, max(abs(surface.position.x), max(abs(surface.position.y), abs(surface.position.z))))))
+}
+/// World direction through a pixel center; also useful for environment backgrounds.
+fn camera_ray(view: Camera, x: u32, y: u32, width: u32, height: u32) -> Vec3 {
+	normalized(transform_direction(view.transform, vec3(((f32(x) + 0.5) / f32(width) - 0.5) * view.sensor_size.x, (0.5 - (f32(y) + 0.5) / f32(height)) * view.sensor_size.y, -view.focal_length)))
+}
+/// Caller-owned linear RGBA input and packed RGBA8 output. Input length must be
+/// at least count and output length at least 4 * count; buffers must not overlap.
+/// Exposure is nonnegative and gamma is positive. Dispatch enough X invocations;
+/// tone_map ignores indices >= count and does not change the linear input.
+struct ToneRoot<I, O> { input: I, pixels: O, count: u64, exposure: f32, gamma: f32 }
+fn display(value: f32, exposure: f32, gamma: f32) -> u8 {
+	let x = max(value * exposure, 0);
+	let mapped = x / (1 + x);
+	u8(clamp(pow(mapped, 1 / gamma) * 255 + 0.5, 0, 255))
+}
+@compute_shader
+fn tone_map(index: u64, root: Ptr<ToneRoot<Span<Vec4>, SpanMut<u8>>>) {
+	if (index < root.count) {
+		let color = root.input:at(index);
+		root.pixels:at_mut(index * 4) = display(color.x, root.exposure, root.gamma);
+		root.pixels:at_mut(index * 4 + 1) = display(color.y, root.exposure, root.gamma);
+		root.pixels:at_mut(index * 4 + 2) = display(color.z, root.exposure, root.gamma);
+		root.pixels:at_mut(index * 4 + 3) = 255;
+	};
+}

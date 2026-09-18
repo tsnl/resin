@@ -2,9 +2,11 @@ use std::slice;
 
 use ash::{Device, vk};
 
-use super::{COLOR_FORMAT, ResinGpu, ResinStatus, vk_status};
+use super::{ResinGpu, ResinStatus, vk_status};
+use crate::ResinImageFormat;
 
 pub struct ResinPipeline {
+    pub(super) graphics_format: Option<(ResinImageFormat, bool)>,
     pub(super) ray: Option<super::ray::Dispatch>,
     pub(super) device: Device,
     pub(super) handle: vk::Pipeline,
@@ -51,6 +53,29 @@ impl ResinGpu {
         vertex_spv: &[u8],
         fragment_spv: &[u8],
     ) -> Result<ResinPipeline, ResinStatus> {
+        unsafe {
+            self.create_graphics_pipeline_with_format(
+                vertex_spv,
+                fragment_spv,
+                ResinImageFormat::Rgba8,
+                false,
+            )
+        }
+    }
+
+    /// # Safety
+    /// Valid SPIR-V and GPU lifetime as for create_graphics_pipeline.
+    pub unsafe fn create_graphics_pipeline_with_format(
+        &self,
+        vertex_spv: &[u8],
+        fragment_spv: &[u8],
+        format: ResinImageFormat,
+        depth: bool,
+    ) -> Result<ResinPipeline, ResinStatus> {
+        if format == ResinImageFormat::Depth32 {
+            return Err(ResinStatus::InvalidArgument);
+        }
+        let color_format = format.vulkan();
         let vertex = ShaderModule::create(&self.device, vertex_spv)?;
         let fragment = ShaderModule::create(&self.device, fragment_spv)?;
         let stages = [
@@ -77,7 +102,14 @@ impl ResinGpu {
         let dynamic = vk::PipelineDynamicStateCreateInfo::default()
             .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
         let mut rendering = vk::PipelineRenderingCreateInfo::default()
-            .color_attachment_formats(slice::from_ref(&COLOR_FORMAT));
+            .color_attachment_formats(slice::from_ref(&color_format));
+        if depth {
+            rendering = rendering.depth_attachment_format(vk::Format::D32_SFLOAT);
+        }
+        let depth_state = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_test_enable(depth)
+            .depth_write_enable(depth)
+            .depth_compare_op(vk::CompareOp::LESS);
         let info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)
             .vertex_input_state(&vertex_input)
@@ -85,6 +117,7 @@ impl ResinGpu {
             .viewport_state(&viewport)
             .rasterization_state(&rasterization)
             .multisample_state(&multisample)
+            .depth_stencil_state(&depth_state)
             .color_blend_state(&blend)
             .dynamic_state(&dynamic)
             .layout(self.push_layout)
@@ -96,7 +129,10 @@ impl ResinGpu {
                 None,
             )
         };
-        ResinPipeline::create(&self.device, vk::PipelineBindPoint::GRAPHICS, result)
+        let mut pipeline =
+            ResinPipeline::create(&self.device, vk::PipelineBindPoint::GRAPHICS, result)?;
+        pipeline.graphics_format = Some((format, depth));
+        Ok(pipeline)
     }
 }
 
@@ -109,6 +145,7 @@ impl ResinPipeline {
         match result {
             Ok(pipelines) => Ok(Self {
                 ray: None,
+                graphics_format: None,
                 device: device.clone(),
                 handle: pipelines[0],
                 bind_point,

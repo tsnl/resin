@@ -9,6 +9,12 @@
 extern "C" {
 #endif
 
+/* Linear RGBA float32, packed top-left first. Missing file alpha becomes one.
+   Results use resin_image_free; failures clear all output fields. */
+ResinStatus resin_image_read_exr(const char *path, uint32_t *width, uint32_t *height, float **pixels);
+ResinStatus resin_image_read_hdr(const char *path, uint32_t *width, uint32_t *height, float **pixels);
+ResinStatus resin_image_write_exr(const char *path, uint32_t width, uint32_t height, const float *pixels, size_t sample_count);
+
 /* Packed 8-bit channels, top-left origin. 1=Y, 2=YA, 3=RGB, 4=RGBA.
    `row_stride` separates row starts; 0 means `width * channels`.
    The final row needs only its pixel bytes, without trailing padding. */

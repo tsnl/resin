@@ -112,8 +112,10 @@ fn examples_generate_verified_ir() {
             continue;
         }
         found += 1;
-        let module =
-            pipeline::file_module(&path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        // Match executable builds: shader-only helpers become shader instances
+        // through their pipeline entries, never unsolicited host roots.
+        let module = pipeline::host_entry(&path, "main")
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         verify(&module).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
     assert!(

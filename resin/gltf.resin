@@ -1,0 +1,79 @@
+//! Load a static glTF or GLB scene into renderer-independent, immutable CPU tables.
+//! The default scene (or first scene) is flattened into world-space triangles.
+//! Keep the GltfScene alive while using its borrowed spans. Texture texels retain
+//! their encoded transfer function: albedo/emission use sRGB; other maps are linear.
+export { GltfScene, GltfVertex, GltfMaterial, GltfTexture, gltf_load, vertices, materials, textures, texture_pixels, clone };
+extern {
+	"resin_runtime.h": {
+		fn resin_gltf_load(path: Ptr<u8>, output: PtrMut<PtrMut<ResinGltfScene>>) -> i32;
+		fn resin_gltf_count(scene: Ptr<ResinGltfScene>, table: u32) -> u64;
+		fn resin_gltf_free(scene: PtrMut<ResinGltfScene>);
+		fn resin_gltf_table(scene: Ptr<ResinGltfScene>, table: u32, length: PtrMut<u64>) -> Ptr<u8>;
+	},
+};
+import { "linalg.resin", "span.resin", "shared.resin", "status.resin", "string.resin", "internal/status_codes.resin" };
+extern type ResinGltfScene;
+
+/// Every three consecutive vertices form a triangle. All its material indices agree.
+struct GltfVertex { position: Vec3, normal: Vec3, uv: Vec2, tangent: Vec4, color: Vec4, material: u32 }
+/// Missing textures use ~u32(0). Flags: MASK=1, BLEND=2, DOUBLE_SIDED=4.
+struct GltfMaterial {
+	albedo: Vec4,
+	emissive: Vec3,
+	metallic: f32,
+	roughness: f32,
+	albedo_texture: u32,
+	metallic_roughness_texture: u32,
+	emissive_texture: u32,
+	normal_texture: u32,
+	normal_scale: f32,
+	alpha_cutoff: f32,
+	flags: u32,
+}
+/// Packed RGBA8 image and sampler. Wrap codes are glTF's GL enums; nearest=0
+/// selects bilinear filtering. Mipmap minification is currently reduced to level zero.
+struct GltfTexture { first_byte: u64, width: u32, height: u32, wrap_s: u32, wrap_t: u32, nearest: u32, reserved: u32 }
+struct GltfOwner { handle: PtrMut<ResinGltfScene> }
+fn drop(self: RefMut<GltfOwner>) {
+	resin_gltf_free(self.handle);
+}
+struct GltfScene { owner: ArcPtr<GltfOwner> }
+/// Load a bounded path; embedded NULs are rejected before the native call.
+fn gltf_load(path: Span<u8>) -> GltfScene | Err<RuntimeError> {
+	let terminated = path_string(path)?;
+	let owner = arc_ptr_alloc(GltfOwner { handle = PtrMut<ResinGltfScene>(u64(0)) })?;
+	runtime_status_from_code(resin_gltf_load(terminated:get().data, &owner:get().handle))?;
+	GltfScene { owner = owner }
+}
+fn clone(self: Ref<GltfScene>) -> GltfScene {
+	GltfScene { owner = self.owner:clone() }
+}
+fn table<T>(self: Ref<GltfScene>, index: u32) -> Span<T> {
+	let count = resin_gltf_count(self.owner:get().handle, index);
+	let data = resin_gltf_table(self.owner:get().handle, index, PtrMut<u64>(u64(0)));
+	Span<T> { data = Ptr<T>(data), length = count }
+}
+fn vertices(self: Ref<GltfScene>) -> Span<GltfVertex> {
+	self:table::<GltfVertex>(0)
+}
+fn materials(self: Ref<GltfScene>) -> Span<GltfMaterial> {
+	self:table::<GltfMaterial>(1)
+}
+fn textures(self: Ref<GltfScene>) -> Span<GltfTexture> {
+	self:table::<GltfTexture>(2)
+}
+fn texture_pixels(self: Ref<GltfScene>) -> Span<u8> {
+	self:table::<u8>(3)
+}
+
+// Preserve the bounded path until the native API requires a terminated copy.
+fn path_string(path: Ref<Span<u8>>) -> String | Err<InvalidArgument> {
+	let mut index: u64 = 0;
+	while (index < path.length) {
+		if (path:at(index) == 0) {
+			return Err(InvalidArgument {});
+		};
+		index = index + 1;
+	};
+	string_from_bytes(path)
+}

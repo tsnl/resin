@@ -16,6 +16,13 @@ ash = { version = "0.38", default-features = false, features = ["loaded", "std"]
 glfw-sys = { version = "8", default-features = false, features = ["src-build", "vulkan"] }
 libc = "0.2"
 png = "0.17"
+exr = "1.74"
+gltf = "1.4"
+mikktspace = { version = "0.3", default-features = false, features = ["glam"] }
+image = { version = "0.25", default-features = false, features = ["hdr", "jpeg", "png"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 glfw-sys = { version = "8", default-features = false, features = ["x11", "wayland"] }

@@ -1,10 +1,13 @@
 //! GPU ownership, typed pipelines, allocations, and command recording.
 //! Submission waits for recorded work; borrowed shader views do not own host resources.
 
-export { map, device, GpuRayScene, GpuRayTracingPipeline, create_ray_scene, create_ray_tracing_pipeline, supports_ray_tracing, trace_rays, trace_ray, ray_hit_info, Gpu, GpuPtr, GpuPtrMut, GpuSpan, GpuSpanMut, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
+export { GraphicsConfig, graphics_config, image_rgba8, image_rgba32f, image_depth32, map, device, GpuRayScene, GpuRayTracingPipeline, create_ray_scene, create_ray_tracing_pipeline, supports_ray_tracing, trace_rays, trace_ray, ray_hit_info, Gpu, GpuPtr, GpuPtrMut, GpuSpan, GpuSpanMut, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
 
 extern {
 	"resin_runtime.h": {
+		fn resin_gpu_create_image_format(gpu: PtrMut<ResinGpu>, width: u32, height: u32, format: u32, image: PtrMut<PtrMut<ResinImage>>) -> i32;
+		fn resin_gpu_create_graphics_pipeline_format(gpu: PtrMut<ResinGpu>, vertex: Ptr<u8>, vertex_length: u64, fragment: Ptr<u8>, fragment_length: u64, format: u32, depth: u32, pipeline: PtrMut<PtrMut<ResinPipeline>>) -> i32;
+		fn resin_gpu_begin_rendering_depth(commands: PtrMut<ResinCommandBuffer>, image: PtrMut<ResinImage>, depth: PtrMut<ResinImage>, r: f32, g: f32, b: f32, a: f32) -> i32;
 		fn resin_gpu_supports_ray_tracing(gpu: PtrMut<ResinGpu>) -> u32;
 		fn resin_gpu_create_ray_scene(gpu: PtrMut<ResinGpu>, vertices: PtrMut<f32>, vertex_count: u32, transforms: PtrMut<f32>, instance_count: u32, scene: PtrMut<PtrMut<ResinRayScene>>) -> i32;
 		fn resin_gpu_free_ray_scene(scene: PtrMut<ResinRayScene>);
@@ -468,9 +471,9 @@ fn draw(self: Ref<GpuCommands>, pipeline: Ref<GpuPipelineOwner>, root: GpuArgume
 	}
 }
 
-fn copy_image_to_buffer(self: Ref<GpuCommands>, image: Ref<GpuImage>, buffer: Ref<GpuSpanMut<u8>>) -> (() | Err<RuntimeError>) {
+fn copy_image_to_buffer<T>(self: Ref<GpuCommands>, image: Ref<GpuImage>, buffer: Ref<GpuSpanMut<T>>) -> (() | Err<RuntimeError>) {
 	self.owner:get():retain(None, image:clone())?;
-	runtime_status_from_code(gpu_view_copy_image(buffer.data.view, buffer.length, PtrMut<u8>(self:native()), PtrMut<u8>(image:native())))
+	runtime_status_from_code(gpu_view_copy_image(buffer.data.view, buffer.length * size_of(T), PtrMut<u8>(self:native()), PtrMut<u8>(image:native())))
 }
 
 fn submit(self: Ref<GpuCommands>) -> (() | Err<RuntimeError>) {
@@ -590,3 +593,44 @@ fn clone<Root, Owner>(value: Ref<GpuRayTracingPipeline<Root, Owner>>) -> GpuRayT
 
 intrinsic "gpu_view_load" fn gpu_view_load<T>(view: GpuView) -> T;
 intrinsic "gpu_view_store" fn gpu_view_store<T>(view: GpuView, value: T) -> ();
+
+// Explicit color storage and optional LESS depth testing. Existing defaults remain
+// RGBA8 without depth. A pipeline and its render pass must use matching formats.
+const image_rgba8: u32 = 0;
+const image_rgba32f: u32 = 1;
+const image_depth32: u32 = 2;
+struct GraphicsConfig { gpu: Gpu, color_format: u32, depth_test: bool }
+fn graphics_config(self: Ref<Gpu>, color_format: u32, depth_test: bool) -> GraphicsConfig {
+	GraphicsConfig { gpu = self:clone(), color_format = color_format, depth_test = depth_test }
+}
+@gpu_graphics_pipeline
+fn create_graphics_pipeline(self: Ref<GraphicsConfig>, vertex: (Ptr<u8>, u64), fragment: (Ptr<u8>, u64)) -> GpuPipelineOwner | Err<RuntimeError> {
+	let owner = arc_ptr_alloc(PipelineOwner { handle = PtrMut<ResinPipeline>(u64(0)), gpu = self.gpu:clone() })?;
+	runtime_status_from_code(
+		resin_gpu_create_graphics_pipeline_format(
+			self.gpu:native(),
+			vertex.0,
+			vertex.1,
+			fragment.0,
+			fragment.1,
+			self.color_format,
+			if (self.depth_test) {
+				u32(1)
+			} else {
+				u32(0)
+			},
+			&owner:get().handle
+		)
+	)?;
+	GpuPipelineOwner { owner = owner }
+}
+fn create_image(self: Ref<Gpu>, width: u32, height: u32, format: u32) -> GpuImage | Err<RuntimeError> {
+	let owner = arc_ptr_alloc(ImageOwner { handle = PtrMut<ResinImage>(u64(0)), gpu = self:clone() })?;
+	runtime_status_from_code(resin_gpu_create_image_format(self:native(), width, height, format, &owner:get().handle))?;
+	GpuImage { owner = owner }
+}
+fn begin_rendering(self: Ref<GpuCommands>, image: Ref<GpuImage>, depth: Ref<GpuImage>, r: f32, g: f32, b: f32, a: f32) -> () | Err<RuntimeError> {
+	self.owner:get():retain(None, image:clone())?;
+	self.owner:get():retain(None, depth:clone())?;
+	runtime_status_from_code(resin_gpu_begin_rendering_depth(self:native(), image:native(), depth:native(), r, g, b, a))
+}

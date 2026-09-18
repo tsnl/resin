@@ -1,9 +1,13 @@
-//! PNG image input and output using bounded byte views.
+//! PNG, OpenEXR, and Radiance HDR image input, with bounded byte or float views.
+//! Float images preserve linear RGBA values without clamping or tone mapping.
 
-export { ImageData, width, height, channels, pixels, image_data_read_png, image_data_write_pixels, write_png, clone };
+export { ImageData, FloatImageData, width, height, channels, pixels, image_data_read_png, image_data_write_pixels, write_png, image_data_read_exr, image_data_read_hdr, image_data_write_exr_pixels, write_exr, clone };
 
 extern {
 	"resin_runtime.h": {
+		fn resin_image_read_exr(path: Ptr<u8>, width: PtrMut<u32>, height: PtrMut<u32>, pixels: PtrMut<PtrMut<f32>>) -> i32;
+		fn resin_image_read_hdr(path: Ptr<u8>, width: PtrMut<u32>, height: PtrMut<u32>, pixels: PtrMut<PtrMut<f32>>) -> i32;
+		fn resin_image_write_exr(path: Ptr<u8>, width: u32, height: u32, pixels: Ptr<f32>, sample_count: u64) -> i32;
 		fn resin_image_write_png(path: Ptr<u8>, width: u32, height: u32, channels: u32, pixels: Ptr<u8>, stride: u64) -> i32;
 		fn resin_image_read_png(path: Ptr<u8>, channels: u32, width: PtrMut<u32>, height: PtrMut<u32>, actual_channels: PtrMut<u32>, pixels: PtrMut<PtrMut<u8>>) -> i32;
 		fn resin_image_free(pixels: PtrMut<u8>) -> ();
@@ -101,4 +105,74 @@ fn path_string(path: Ref<Span<u8>>) -> String | Err<InvalidArgument> {
 		index = index + 1;
 	};
 	string_from_bytes(path)
+}
+
+//
+// Linear floating-point images
+//
+
+struct FloatImageOwner {
+	width: u32,
+	height: u32,
+	pixels: PtrMut<f32>,
+}
+fn drop(self: RefMut<FloatImageOwner>) {
+	resin_image_free(PtrMut<u8>(self.pixels));
+}
+
+/// Shared ownership of packed linear RGBA float32 samples, with top-left origin.
+/// Values above one and negative values are retained; alpha is unpremultiplied.
+struct FloatImageData {
+	owner: ArcPtr<FloatImageOwner>,
+}
+fn width(self: Ref<FloatImageData>) -> u32 {
+	self.owner:get().width
+}
+fn height(self: Ref<FloatImageData>) -> u32 {
+	self.owner:get().height
+}
+fn channels(self: Ref<FloatImageData>) -> u32 {
+	4
+}
+fn pixels(self: Ref<FloatImageData>) -> SpanMut<f32> {
+	let data = self.owner:get();
+	SpanMut<f32> { data = data.pixels, length = u64(data.width) * u64(data.height) * 4 }
+}
+fn clone(self: Ref<FloatImageData>) -> FloatImageData {
+	FloatImageData { owner = self.owner:clone() }
+}
+
+/// Decode the first RGB(A) layer of an OpenEXR file. Missing alpha becomes one.
+fn image_data_read_exr(path: Span<u8>) -> FloatImageData | Err<RuntimeError> {
+	read_float_image(path, true)
+}
+
+/// Decode a Radiance RGBE (.hdr) environment map into linear RGBA float32.
+fn image_data_read_hdr(path: Span<u8>) -> FloatImageData | Err<RuntimeError> {
+	read_float_image(path, false)
+}
+
+fn read_float_image(path: Span<u8>, exr: bool) -> FloatImageData | Err<RuntimeError> {
+	let terminated = path_string(path)?;
+	let owner = arc_ptr_alloc(FloatImageOwner { width = 0, height = 0, pixels = PtrMut<f32>(u64(0)) })?;
+	let data = owner:get();
+	let code = if (exr) {
+		resin_image_read_exr(terminated:get().data, &data.width, &data.height, &data.pixels)
+	} else {
+		resin_image_read_hdr(terminated:get().data, &data.width, &data.height, &data.pixels)
+	};
+	runtime_status_from_code(code)?;
+	FloatImageData { owner = owner }
+}
+
+/// Write a complete packed RGBA float image. The span must contain exactly
+/// width * height * 4 samples; invalid extents preserve any existing file.
+fn image_data_write_exr_pixels(path: Span<u8>, width: u32, height: u32, pixels: Span<f32>) -> () | Err<RuntimeError> {
+	let terminated = path_string(path)?;
+	runtime_status_from_code(resin_image_write_exr(terminated:get().data, width, height, pixels.data, pixels.length))
+}
+
+fn write_exr(self: Ref<FloatImageData>, path: Span<u8>) -> () | Err<RuntimeError> {
+	let view = self:pixels();
+	image_data_write_exr_pixels(path, self:width(), self:height(), view:read_only())
 }

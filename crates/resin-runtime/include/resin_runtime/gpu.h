@@ -238,6 +238,11 @@ ResinStatus resin_gpu_create_ray_pipeline(const ResinGpu *gpu, const ResinRaySce
 ResinStatus resin_gpu_trace_rays(ResinCommandBuffer *commands, ResinDeviceAddress root, uint32_t x, uint32_t y, uint32_t z);
 ResinStatus resin_gpu_projected_trace_rays(ResinCommandBuffer *commands, ResinArc *projection, uint32_t x, uint32_t y, uint32_t z);
 
+/* Formats: 0 RGBA8 UNORM, 1 RGBA32 float, 2 depth32 float. */
+ResinStatus resin_gpu_create_image_format(ResinGpu *gpu, uint32_t width, uint32_t height, uint32_t format, ResinImage **output);
+ResinStatus resin_gpu_create_graphics_pipeline_format(ResinGpu *gpu, const uint8_t *vertex, size_t vertex_length, const uint8_t *fragment, size_t fragment_length, uint32_t format, uint32_t depth_test, ResinPipeline **output);
+ResinStatus resin_gpu_begin_rendering_depth(ResinCommandBuffer *commands, ResinImage *color, ResinImage *depth, float r, float g, float b, float a);
+
 #ifdef __cplusplus
 }
 #endif

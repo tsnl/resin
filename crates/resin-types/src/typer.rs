@@ -16,7 +16,10 @@ pub(super) fn lookup(name: &str, arity: usize) -> Result<BuiltinRule, TypeError>
         "assert" => (BuiltinRule::Assert, arity == 1),
         "!" => (BuiltinRule::Boolean, arity == 1),
         "&&" | "||" => (BuiltinRule::Boolean, arity == 2),
-        "sqrt" | "sin" | "cos" => (BuiltinRule::Float, arity == 1),
+        "sqrt" | "sin" | "cos" | "floor" | "exp" | "acos" | "log" => {
+            (BuiltinRule::Float, arity == 1)
+        }
+        "atan2" | "pow" => (BuiltinRule::Float, arity == 2),
         "repr" => (BuiltinRule::Repr, arity == 1),
         "format_bytes" => (BuiltinRule::Format, arity == 3),
         "string_from_bytes" => (BuiltinRule::StringFromBytes, arity == 2),
@@ -200,6 +203,9 @@ pub(super) fn type_builtin_call(
             Ty::Unit
         }
         BuiltinRule::Float => {
+            for arg in &args[1..] {
+                same(&args[0], arg)?;
+            }
             if !matches!(args[0], Ty::Float32 | Ty::Float64) {
                 return Err(TypeError::new(TypeErrorKind::UnsupportedBuiltin {
                     name: name.into(),
@@ -585,7 +591,8 @@ pub(super) fn shader_builtin_instance(
         ) => true,
         ("/", 2) => operand == Ty::Float32 || operand.is_integer(),
         ("%" | "<<" | ">>", 2) => operand.is_integer(),
-        ("sqrt" | "sin" | "cos", 1) => operand == Ty::Float32,
+        ("atan2" | "pow", 2) => operand == Ty::Float32,
+        ("sqrt" | "sin" | "cos" | "floor" | "exp" | "acos" | "log", 1) => operand == Ty::Float32,
         _ => false,
     };
     if !supported || operand == Ty::Type {
