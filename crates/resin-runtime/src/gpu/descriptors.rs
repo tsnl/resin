@@ -20,22 +20,25 @@ impl Layout {
         modules: &[(&[u8], bool)],
     ) -> Result<Option<Rc<Self>>, ResinStatus> {
         let mut count = None;
+        let mut physical_addresses = false;
         for (module, allow_writes) in modules {
             let words = super::pipeline::spirv_words(module)?;
             let interface = reflect(&words)?;
             if interface.writes && !allow_writes {
                 return Err(ResinStatus::Unsupported);
             }
+            physical_addresses |= interface.physical_addresses;
+            if interface.physical_addresses && !gpu.device_addresses {
+                return Err(ResinStatus::Unsupported);
+            }
             if let Some(bindings) = interface.count {
                 count = Some(count.unwrap_or(0).max(bindings));
-            } else if !gpu.device_addresses {
-                return Err(ResinStatus::Unsupported);
             }
         }
         let Some(count) = count else {
             return Ok(None);
         };
-        if count > gpu.storage_bindings {
+        if physical_addresses || count > gpu.storage_bindings {
             return Err(ResinStatus::Unsupported);
         }
         let bindings = (0..count)
@@ -81,6 +84,7 @@ impl Drop for Layout {
 // their binding numbers. Physical-addressing modules retain the legacy ABI.
 struct Interface {
     count: Option<u32>,
+    physical_addresses: bool,
     writes: bool,
 }
 
@@ -118,10 +122,14 @@ fn reflect(words: &[u32]) -> Result<Interface, ResinStatus> {
     if !logical {
         return Ok(Interface {
             count: None,
+            physical_addresses: true,
             writes: false,
         });
     }
-    let mut count = 1u32; // Reserved read-only constants channel, even if unused.
+    // An entry with no active resources must not choose the descriptor ABI for
+    // another stage. In particular, a rootless vertex can accompany a legacy
+    // pointer-root fragment; its Logical addressing does not change that ABI.
+    let mut count = 0u32;
     for (id, binding) in bindings {
         if sets.get(&id) != Some(&0) || variables.get(&id) != Some(&12) {
             return Err(ResinStatus::Unsupported);
@@ -132,7 +140,8 @@ fn reflect(words: &[u32]) -> Result<Interface, ResinStatus> {
         .iter()
         .any(|(id, storage)| *storage == 12 && !readonly.contains(id));
     Ok(Interface {
-        count: Some(count),
+        count: (count != 0).then_some(count),
+        physical_addresses: false,
         writes,
     })
 }
@@ -291,6 +300,14 @@ mod tests {
         ] {
             assert!(reflect(&[header.as_slice(), &tail].concat()).is_err());
         }
+    }
+    #[test]
+    fn a_stage_without_bindings_does_not_choose_a_resource_abi() {
+        let words = [0x07230203, 0x10600, 0, 10, 0, 3 << 16 | 14, 0, 1];
+        let interface = reflect(&words).unwrap();
+        assert_eq!(interface.count, None);
+        assert!(!interface.physical_addresses);
+        assert!(!interface.writes);
     }
     #[test]
     fn descriptor_reflection_counts_binding_slots_not_alias_variables() {
