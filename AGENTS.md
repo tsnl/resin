@@ -346,7 +346,14 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   handles in the compiler. Explicit intrinsic declarations register GPU wrapper projections;
   dispatch/draw consume completed projection plans checked again by the verifier.
   Pipeline tokens bind root, owner, and stage; validate them before projecting arguments.
-  Host GPU access uses `load`, `store`, and `replace`, with no raw host pointer escape.
+  GPU owners expose borrowed `device()` pointers/spans and fallible `map()` host views.
+  Both preserve permissions, offsets, and lengths; addresses carry no device/space tag.
+  Reuse persistent coherent mappings for the allocation lifetime. The caller retains
+  allocations and synchronizes raw accesses. Device-only storage cannot be host-mapped.
+  GPU elements may contain plain pointers/spans; mapping never rewrites embedded addresses.
+  Launch values with the exact shader root type preserve pointer bits and snapshot only
+  the root; existing owner projection retains its explicit GPU owners. Keep the BDA ABI,
+  without descriptor bundles, fat pointers, placed-map requirements, or implicit relocation.
   `gpu:create(initial)`, `gpu:alloc::<T>(count)`, and `gpu:alloc_in::<T>(count, memory)`
   are ordinary generic source functions. Shader-declaration factories keep explicit native bridges.
 - String literals have primitive type `str`, distinct from `Span<u8>` and the owned

@@ -127,6 +127,14 @@ fn sexp_function(names: &Names, index: usize, function: &Function) -> SExp {
 
 fn sexp_instr(names: &Names, fn_names: &FunctionNames, instr: &Instr) -> SExp {
     match instr {
+        Instr::GpuViewAddress { pointer, host } => list(
+            if *host {
+                "gpu-view-map"
+            } else {
+                "gpu-view-device"
+            },
+            vec![sexp_ty(names, pointer)],
+        ),
         Instr::GpuViewLoad { element } => list("gpu-view-load", vec![sexp_ty(names, element)]),
         Instr::GpuViewAllocate => symbol("gpu-view-allocate"),
         Instr::GpuViewRange { element } => list("gpu-view-range", vec![sexp_ty(names, element)]),

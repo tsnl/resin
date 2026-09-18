@@ -128,18 +128,18 @@ fn palette(count: i32) -> Color {
 // chosen by the application, not a claim that it is optimal for every GPU.
 const pixels_per_segment: u32 = 32;
 
-// One record shape serves both targets. SpanMut<u8> borrows pixels for evaluation;
-// GpuSpanMut<u8> retains device storage when the host records a GPU launch. Dispatch
-// checks and projects that owning handle to the span expected by the shader.
-struct Parameters<Buffer> {
+// Both targets use the same record and borrowed span. CPU execution receives
+// host addresses; GPU execution receives device addresses. Keep the allocation
+// owner alive until evaluation and any recorded GPU work finish.
+struct Parameters {
 	plot: Plot,
 	solver: Mandelbrot,
 	start_segment: u64,
 	segment_count: u64,
-	pixels: Buffer,
+	pixels: SpanMut<u8>,
 }
 
-fn evaluate_pixel(root: Ref<Parameters<SpanMut<u8>>>, x: u32, y: u32) -> Color {
+fn evaluate_pixel(root: Ref<Parameters>, x: u32, y: u32) -> Color {
 	// Sample once at the pixel center. Iteration and coloring remain separate so
 	// changing the palette does not change which coordinates escape.
 	let c = root.plot:at(f32(x) + 0.5, f32(y) + 0.5);
@@ -163,7 +163,7 @@ fn store_pixel(pixels: SpanMut<u8>, index: u64, color: Color) {
 // remainder recover its origin; the last segment stops at the right edge.
 // GPU dispatch rounds up to whole workgroups, so surplus invocations return.
 // Valid segments write disjoint bytes and need no synchronization with each other.
-fn evaluate_segment(segment_index: u64, root: Ref<Parameters<SpanMut<u8>>>) {
+fn evaluate_segment(segment_index: u64, root: Ref<Parameters>) {
 	if (segment_index >= root.segment_count) {
 		return;
 	};
@@ -188,7 +188,7 @@ fn segment_count(plot: Plot) -> u64 {
 
 // CPU execution calls the same evaluator as the shader wrapper below. Ordinary
 // helpers need no shader annotation; the compiler specializes them for each target.
-fn dispatch_host(root: Ref<Parameters<SpanMut<u8>>>) {
+fn dispatch_host(root: Ref<Parameters>) {
 	let mut segment: u64 = 0;
 	while (segment < root.segment_count) {
 		evaluate_segment(segment, root);
@@ -202,7 +202,7 @@ fn dispatch_host(root: Ref<Parameters<SpanMut<u8>>>) {
 // yields T. Scope cleanup releases owners on both normal and error exits.
 fn host_image(plot: Plot, solver: Mandelbrot) -> ArcSpan<u8> | Err<_> {
 	let pixels = arc_span_alloc::<u8>(u64(plot.width) * u64(plot.height) * 4, 0)?;
-	let root = Parameters<_> { plot = plot, solver = solver, start_segment = 0, segment_count = plot:segment_count(), pixels = pixels:get() };
+	let root = Parameters { plot = plot, solver = solver, start_segment = 0, segment_count = plot:segment_count(), pixels = pixels:get() };
 	dispatch_host(root);
 	pixels
 }
@@ -215,7 +215,7 @@ fn host_image(plot: Plot, solver: Mandelbrot) -> ArcSpan<u8> | Err<_> {
 // Dereferencing root gives a place the evaluator can borrow through Ref.
 // Ref permits access without promising an address; Ptr explicitly carries one.
 @compute_shader
-fn compute(segment_index: u64, root: PtrMut<Parameters<SpanMut<u8>>>) {
+fn compute(segment_index: u64, root: Ptr<Parameters>) {
 	evaluate_segment(segment_index, root.*);
 }
 
@@ -240,7 +240,7 @@ fn vertex(index: i32) -> Vertex {
 }
 
 @fragment_shader
-fn fragment(uv: Color, root: PtrMut<Parameters<SpanMut<u8>>>) -> Color {
+fn fragment(uv: Color, root: Ptr<Parameters>) -> Color {
 	// Read the computed byte buffer back as normalized display colors.
 	let x = u32(uv.r * f32(root.plot.width));
 	let y = u32(uv.g * f32(root.plot.height));
@@ -258,8 +258,8 @@ fn fragment(uv: Color, root: PtrMut<Parameters<SpanMut<u8>>>) -> Color {
 // Owners release their resources automatically when the renderer leaves scope.
 struct Renderer {
 	gpu: Gpu,
-	graphics: GpuGraphicsPipeline<Parameters<SpanMut<u8>>, GpuPipelineOwner>,
-	compute: GpuComputePipeline<Parameters<SpanMut<u8>>, GpuPipelineOwner>,
+	graphics: GpuGraphicsPipeline<Parameters, GpuPipelineOwner>,
+	compute: GpuComputePipeline<Parameters, GpuPipelineOwner>,
 	pixels: GpuSpanMut<u8>,
 	image: GpuImage,
 }
@@ -278,9 +278,9 @@ fn resize(self: RefMut<Renderer>, width: u32, height: u32) -> () | Err<_> {
 	self.image = self.gpu:create_image(width, height)?;
 }
 
-fn parameters(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, start: u64, count: u64) -> Parameters<GpuSpanMut<u8>> {
-	// Copying a GPU owner retains its allocation for these launch arguments.
-	Parameters<_> { plot = plot, solver = solver, start_segment = start, segment_count = count, pixels = self.pixels }
+fn parameters(self: Ref<Renderer>, plot: Plot, solver: Mandelbrot, start: u64, count: u64) -> Parameters {
+	// The renderer owns the allocation; this span borrows its device address.
+	Parameters { plot = plot, solver = solver, start_segment = start, segment_count = count, pixels = self.pixels:device() }
 }
 
 fn dispatch_gpu(self: Ref<Renderer>, commands: Ref<GpuCommands>, plot: Plot, solver: Mandelbrot) -> () | Err<_> {
@@ -694,7 +694,7 @@ fn test() -> () | Err<_> {
 	edge.center.real = 2.0;
 	edge.span = 2.0;
 	let pixels = arc_ptr_alloc([0, 0, 0, 0, 123])?;
-	let root = Parameters<_> { plot = edge, solver = mandelbrot_new(32), start_segment = 0, segment_count = 1, pixels = SpanMut<u8> { data = pixels:get():lea(0), length = 4 } };
+	let root = Parameters { plot = edge, solver = mandelbrot_new(32), start_segment = 0, segment_count = 1, pixels = SpanMut<u8> { data = pixels:get():lea(0), length = 4 } };
 	dispatch_host(root);
 	evaluate_segment(1, root);
 	let color = palette(2);

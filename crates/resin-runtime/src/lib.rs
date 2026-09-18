@@ -175,6 +175,39 @@ pub unsafe extern "C" fn resin_gpu_ptr_host(
     unsafe { gpu_view::host(value, bytes, alignment, required_access) }
 }
 
+/// Borrow a host mapping or device address without retaining the allocation.
+/// Host mappings use coherent memory and remain valid until allocation release.
+///
+/// # Safety
+/// `value.owner` must be null or a live GPU allocation owner; `out` must be writable.
+/// The caller keeps the allocation alive and uses the address only in its matching
+/// execution context, synchronizing all host/device accesses explicitly.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn resin_gpu_ptr_address(
+    value: ResinGpuPtr,
+    bytes: usize,
+    alignment: usize,
+    access: u32,
+    host: u32,
+    out: *mut u64,
+) -> ResinStatus {
+    if out.is_null() || host > 1 {
+        return ResinStatus::InvalidArgument;
+    }
+    unsafe {
+        *out = 0;
+    }
+    match unsafe { gpu_view::address(value, bytes, alignment, access, host != 0) } {
+        Ok(address) => {
+            unsafe {
+                *out = address;
+            }
+            ResinStatus::Success
+        }
+        Err(status) => status,
+    }
+}
+
 /// Derive a checked interior view without retaining its borrowed owner.
 ///
 /// # Safety

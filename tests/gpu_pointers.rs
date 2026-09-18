@@ -712,7 +712,6 @@ fn gpu_allocation_rejects_managed_and_opaque_elements_before_access() {
     for (element, diagnostic) in [
         ("ArcPtr<i32>", "plain shared storage"),
         ("WeakPtr<i32>", "plain shared storage"),
-        ("PtrMut<Native>", "plain shared storage"),
         ("Native", "no shared host/device layout"),
     ] {
         let source = format!(

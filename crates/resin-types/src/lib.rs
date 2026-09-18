@@ -512,6 +512,7 @@ pub enum Intrinsic {
     GpuViewOffset,
     GpuViewRange,
     GpuViewRestrict,
+    GpuViewAddress { host: bool, mutable: bool },
     GpuViewLoad,
     GpuViewStore,
     GpuViewReplace,

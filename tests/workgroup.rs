@@ -5,7 +5,7 @@ const EXAMPLE: &str = include_str!("../examples/workgroup.resin");
 #[test]
 fn ordinary_host_calls_borrow_state_and_use_one_lane() {
     let module = support::module(EXAMPLE);
-    let project = support::project::Project::new(&module, Some("main")).unwrap();
+    let project = support::project::Project::new(&module, Some("host_main")).unwrap();
     let output = project.run();
     assert!(
         output.status.success(),

@@ -52,6 +52,25 @@ pub(super) fn check(
             super::rules::expect_types(&[Ty::GpuView, Ty::UInt32], &args, location)?;
             Ty::GpuView
         }
+        Instr::GpuViewAddress { pointer, .. } => {
+            super::rules::expect_types(&[Ty::GpuView, Ty::UInt64], &args, location)?;
+            let Ty::Pointer { pointee, .. } = pointer else {
+                return Err(invalid());
+            };
+            gpu_element(module, pointee, location)?;
+            Ty::Record {
+                fields: vec![
+                    RecordField {
+                        name: "_0".into(),
+                        ty: Ty::union_of([pointer.clone(), Ty::None]),
+                    },
+                    RecordField {
+                        name: "_1".into(),
+                        ty: Ty::Int32,
+                    },
+                ],
+            }
+        }
         Instr::GpuViewLoad { element } => {
             expect_type(Ty::GpuView, args[0].clone(), location)?;
             gpu_element(module, element, location)?;

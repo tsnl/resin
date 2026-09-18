@@ -121,6 +121,9 @@ pub enum Instr {
     GpuViewRestrict,
     /// `[view] -> [element]`: copy plain storage after checking read access.
     GpuViewLoad { element: Ty },
+    /// `[view, count] -> [(pointer | None, i32)]`: borrow a host or device address.
+    /// The allocation owner must outlive the returned pointer and every GPU use.
+    GpuViewAddress { pointer: Ty, host: bool },
     /// `[view, element] -> [unit]`: copy plain storage after checking write access.
     GpuViewStore,
     /// `[view, element] -> [element]`: exchange plain storage after checking read/write access.

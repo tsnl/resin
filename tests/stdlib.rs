@@ -409,6 +409,9 @@ fn every_native_status_operation_has_a_public_result_wrapper() {
                     continue;
                 }
                 "gpu_ptr_allocate" => "malloc",
+                // Generic map/device overloads are not executable module entries.
+                // gpu_mapping.rs checks their public result and permission contracts.
+                "gpu_ptr_address" => continue,
                 "gpu_create_compute_pipeline" => "create_compute_pipeline",
                 "gpu_create_graphics_pipeline" => "create_graphics_pipeline",
                 "gpu_create_ray_scene" => "create_ray_scene",
@@ -1005,7 +1008,7 @@ fn window_input_snapshots_expose_edges_coordinates_and_named_controls() {
 }
 
 #[test]
-fn gpu_views_do_not_expose_unowned_address_conversions() {
+fn gpu_views_require_explicit_address_borrowing() {
     for expression in [
         "gpu.host_to_device_pointer(Ptr<u8>(u64(0)))",
         "value.host_pointer()",
@@ -1032,7 +1035,7 @@ fn gpu_views_do_not_expose_unowned_address_conversions() {
         .unwrap();
         assert!(
             pipeline::file_module(&path).is_err(),
-            "accepted unowned GPU address escape: {expression}"
+            "accepted implicit GPU address conversion: {expression}"
         );
     }
 }

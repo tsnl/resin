@@ -53,7 +53,8 @@ but neither Resin, source files, nor `spirv-opt` at runtime.
 Pass a typed pipeline and its host arguments to
 `commands:dispatch(pipeline, arguments, x, y, z)` or
 `commands:draw(pipeline, arguments, count)`. The compiler checks the arguments against
-the pipeline and projects GPU views internally. Shader entries keep a typed pointer
+the pipeline. Explicit roots preserve their borrowed pointer bits; retained launch
+records project GPU owners internally. Shader entries keep a typed pointer
 as their second parameter:
 
 ```resin
@@ -68,11 +69,11 @@ fn kernel(index: u64, root: Ptr<Params>) -> ()  {
     } else { () }
 }
 ```
-The entry interfaces are:
-
 The [workgroup interface](workgroups.md) additionally permits a third
 `Workgroup<State>` parameter on compute entries, exposing shared state and an
 explicit barrier while preserving the per-invocation convention below.
+
+The entry interfaces are:
 
 - Compute takes `(u64, Ptr<T>)` and returns `()`. Call `gpu:compute_workgroup_size()`
   to get the `u64` number of invocations per workgroup for that `Gpu`. The runtime
@@ -117,30 +118,17 @@ also leaves room for future attachment records and a Metal discard implementatio
 
 ### Shader arguments and memory
 
-Allocate typed GPU storage with `gpu:create(value)?` (an inferred `GpuPtrMut<T>`) or
-`gpu:alloc::<T>(count)?`. A host launch record replaces shader `Ptr<T>`
-and `Span<T>` fields with `GpuPtr<T>` and `GpuSpan<T>` values. Writable
-`PtrMut` and `SpanMut` fields require the corresponding `GpuPtrMut` and `GpuSpanMut` views:
+Allocate with `gpu:create(value)?` or `gpu:alloc::<T>(count)?`. Borrow a device
+pointer or span with `:device()` and store it in a value of the shader root type.
+The [gradient example](../examples/gradient.resin) uses the same `Root` record on
+both sides. Recording snapshots that root without translating its pointer bits.
+Keep the owning allocations alive until recorded work completes.
 
-```resin
-let values = gpu:alloc::<f32>(1024)?;
-let mut index: u64 = 0;
-while (index < values.length) {
-    values:store(index, f32(1.0));
-    index = index + u64(1);
-};
-struct HostParams { values: GpuSpanMut<f32>, scale: f32 }
-let pipeline = gpu:create_compute_pipeline(kernel)?;
-let commands = gpu:start_command_recording()?;
-commands:dispatch(pipeline, HostParams { values = values, scale = f32(2.0) }, 16, 1, 1)?;
-commands:submit()?;
-```
-
-Projection checks the shader root layout, translates owning views internally, and
-retains every referenced allocation. Use `commands:draw(pipeline, None, count)` for graphics
-shaders without a root. Successful recording retains arguments and allocations
-through synchronous submission or cancellation. They must belong to the recording's
-GPU. See [GPU buffers](gpu-buffers.md).
+After `commands:submit()?` waits for completion, `:map()?` borrows coherent host
+storage for CPU access. Host and device pointers share a Resin type but may have
+different addresses. The programmer supplies the correct address for each
+execution context and device. See [GPU allocations and mapping](gpu-buffers.md)
+for lifetime, memory-mode, and nested-pointer contracts.
 
 Device pointers support loads, stores, record fields, typed indexing, and passing to
 ordinary helpers. Pointer reinterpretation and pointer/integer conversions are host-only. Shared storage supports `u8`, `i32`, `u32`, `i64`, `f32`, `u64`, pointers, nonempty
@@ -150,16 +138,13 @@ scalar-block-layout support. Generated C asserts sizes, alignments, and member o
 Spans occupy 16 bytes (address and length) with alignment 8; arrays retain their element alignment.
 Storage containing booleans, unit, or other numeric widths is rejected for now.
 
-Host `GpuPtr` and `GpuSpan` operations retain their allocation, including indexing,
-and slicing. `load`, `store`, and `replace` access elements on the host.
-`:read_only()` and `:write_only()` narrow per-view
-access permissions. Host accesses check bounds, alignment, mapping, permissions,
-and pending recorded GPU use. `:copy_from(Span<T>)` uploads a bounded host span into the beginning of a writable,
-host-visible GPU span; its source length must fit the destination.
-`:copy_to(SpanMut<T>)` copies into caller-owned host
-memory. GPU views cannot be converted to raw `Ptr` values; the compiler's shader
-projection is the host-to-device address conversion boundary. GPU buffer elements
-must have a shared layout without pointers, spans, owners, or drop hooks.
+Host `GpuPtr`/`GpuSpan` owners and their mutable variants retain allocations;
+borrowed `Ptr`/`Span` values do not. Existing launch records containing GPU owners
+can still use compiler projection, which retains those owners. Explicit roots
+containing raw device pointers use the same nominal type as the shader and retain
+only the root snapshot. GPU buffer elements may contain pointers and spans, but
+mapping does not rewrite those embedded addresses.
+
 
 Shader bodies support `u8`, 32-bit numbers, `i64`, `u64`, booleans, records, nominal types, local mutation,
 branches, loops, and direct calls to named Resin helpers. Integer `/`, `%`, `<<`,

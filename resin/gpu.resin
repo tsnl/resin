@@ -1,7 +1,7 @@
 //! GPU ownership, typed pipelines, allocations, and command recording.
 //! Submission waits for recorded work; borrowed shader views do not own host resources.
 
-export { GpuRayScene, GpuRayTracingPipeline, create_ray_scene, create_ray_tracing_pipeline, supports_ray_tracing, trace_rays, trace_ray, ray_hit_info, Gpu, GpuPtr, GpuPtrMut, GpuSpan, GpuSpanMut, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
+export { map, device, GpuRayScene, GpuRayTracingPipeline, create_ray_scene, create_ray_tracing_pipeline, supports_ray_tracing, trace_rays, trace_ray, ray_hit_info, Gpu, GpuPtr, GpuPtrMut, GpuSpan, GpuSpanMut, GpuComputePipeline, GpuGraphicsPipeline, GpuImage, GpuPipelineOwner, GpuCommands, memory_default, memory_gpu, memory_readback, ResinGpu, ResinGpuDeviceInfo, ResinImage, ResinPipeline, ResinCommandBuffer, load, store, replace, slice, read_only, write_only, at, copy_to, copy_from, native, compute_workgroup_size, gpu_device_count, gpu_enumerate_devices, gpu_new, gpu_new_at, gpu_new_for_window, create, alloc, alloc_in, malloc, create_compute_pipeline, create_graphics_pipeline, create_image, start_command_recording, present, width, height, context, dispatch, begin_rendering, end_rendering, draw, copy_image_to_buffer, submit, cancel, clone };
 
 extern {
 	"resin_runtime.h": {
@@ -178,6 +178,70 @@ fn write_only<T>(self: Ref<GpuPtrMut<T>>) -> GpuPtrMut<T> {
 fn write_only<T>(self: Ref<GpuSpanMut<T>>) -> GpuSpanMut<T> {
 	GpuSpanMut<T> { data = self.data:write_only(), length = self.length }
 }
+
+/// Borrow the coherent host mapping. Keep this allocation alive during access.
+fn map<T>(self: Ref<GpuPtr<T>>) -> Ptr<T> | Err<RuntimeError> {
+	let address = gpu_view_map::<T>(self.view, 1);
+	runtime_status_from_code(address.1)?;
+	address.0!
+}
+
+/// Borrow device addresses. Keep the allocation alive until all GPU uses finish.
+fn device<T>(self: Ref<GpuPtr<T>>) -> Ptr<T> {
+	let address = gpu_view_device::<T>(self.view, 1);
+	assert(address.1 == 0);
+	address.0!
+}
+
+/// Borrow the coherent host mapping. Keep this allocation alive during access.
+fn map<T>(self: Ref<GpuSpan<T>>) -> Span<T> | Err<RuntimeError> {
+	let address = gpu_view_map::<T>(self.data.view, self.length);
+	runtime_status_from_code(address.1)?;
+	Span<T> { data = address.0!, length = self.length }
+}
+
+/// Borrow device addresses. Keep the allocation alive until all GPU uses finish.
+fn device<T>(self: Ref<GpuSpan<T>>) -> Span<T> {
+	let address = gpu_view_device::<T>(self.data.view, self.length);
+	assert(address.1 == 0);
+	Span<T> { data = address.0!, length = self.length }
+}
+
+intrinsic "gpu_view_map" fn gpu_view_map<T>(view: GpuView, count: u64) -> (Ptr<T> | None, i32);
+
+intrinsic "gpu_view_device" fn gpu_view_device<T>(view: GpuView, count: u64) -> (Ptr<T> | None, i32);
+
+/// Borrow the coherent host mapping. Keep this allocation alive during access.
+fn map<T>(self: Ref<GpuPtrMut<T>>) -> PtrMut<T> | Err<RuntimeError> {
+	let address = gpu_view_map_mut::<T>(self.view, 1);
+	runtime_status_from_code(address.1)?;
+	address.0!
+}
+
+/// Borrow device addresses. Keep the allocation alive until all GPU uses finish.
+fn device<T>(self: Ref<GpuPtrMut<T>>) -> PtrMut<T> {
+	let address = gpu_view_device_mut::<T>(self.view, 1);
+	assert(address.1 == 0);
+	address.0!
+}
+
+/// Borrow the coherent host mapping. Keep this allocation alive during access.
+fn map<T>(self: Ref<GpuSpanMut<T>>) -> SpanMut<T> | Err<RuntimeError> {
+	let address = gpu_view_map_mut::<T>(self.data.view, self.length);
+	runtime_status_from_code(address.1)?;
+	SpanMut<T> { data = address.0!, length = self.length }
+}
+
+/// Borrow device addresses. Keep the allocation alive until all GPU uses finish.
+fn device<T>(self: Ref<GpuSpanMut<T>>) -> SpanMut<T> {
+	let address = gpu_view_device_mut::<T>(self.data.view, self.length);
+	assert(address.1 == 0);
+	SpanMut<T> { data = address.0!, length = self.length }
+}
+
+intrinsic "gpu_view_map_mut" fn gpu_view_map_mut<T>(view: GpuView, count: u64) -> (PtrMut<T> | None, i32);
+
+intrinsic "gpu_view_device_mut" fn gpu_view_device_mut<T>(view: GpuView, count: u64) -> (PtrMut<T> | None, i32);
 
 struct GpuComputePipeline<Root, Owner> {
 	contract: GpuPipelineContract,

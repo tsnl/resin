@@ -53,21 +53,25 @@ Process termination and traps do not unwind scopes.
 
 ## Host and GPU
 
-Host code uses source `GpuPtr<T>` and `GpuSpan<T>` wrappers over opaque `GpuView`
+Host code uses source `GpuPtr<T>` / `GpuPtrMut<T>` and `GpuSpan<T>` / `GpuSpanMut<T>` wrappers over opaque `GpuView`
 primitives, carrying an allocation
 owner, byte offset, and access permissions. Value copies, explicit clones, and interior views retain the
 owner. Checked host operations enforce bounds, alignment, mapping state, permissions,
 and exclusion while a command recording can use the allocation. Views cannot be
-cast to ordinary pointers or constructed from raw addresses.
+cast to ordinary pointers or constructed from raw addresses. Explicit `device()`
+and `map()` operations borrow ordinary device or host pointers and spans. Their
+addresses may differ; neither view retains ownership or translates nested pointers.
 
 Shader entries retain ordinary `Ptr<T>` parameters. Pipeline creation accepts shader
 declarations and preserves their stage and root type in source
 `GpuComputePipeline<Root, Owner>` and `GpuGraphicsPipeline<Root, Owner>` values.
-Dispatch and draw check a host launch-record shape derived from that root: shader
+An argument with exactly the root type is snapshotted with its raw pointer bits
+unchanged. Its referenced allocations remain the caller's responsibility.
+Dispatch and draw also support a retained launch-record shape derived from that root: shader
 pointers and spans become owning GPU views on the host. Compiler projection builds
 separate root storage, converts the views internally, and retains their allocations.
-GPU buffer elements use one shared host/device layout and cannot contain pointers or
-managed owners. This boundary does not traverse pointer graphs or modify host
+GPU buffer elements use one shared host/device layout and may contain borrowed
+pointers and spans, but not managed owners. This boundary does not traverse pointer graphs or modify host
 records into device representations.
 
 References remain distinct from pointers through HIR, concrete types, and LIR.
@@ -78,9 +82,10 @@ take explicit device pointers in shaders and host pointers on the CPU. Numeric
 pointer casts preserve bits and do not translate addresses or confer ownership.
 
 Command recordings accept typed pipelines and matching host arguments, retain the
-projected root and every referenced allocation, and exclude CPU access until
-synchronous submission or cancellation. Device writes require completion and visibility before host access.
-Raw host pointers still borrow memory without retaining it, and shader consumption
+root snapshot and any explicitly projected owners, and exclude checked CPU access
+to those owners until synchronous submission or cancellation. Raw pointer graphs
+are not tracked. Device writes require completion and visibility before host access.
+Raw pointers borrow memory without retaining it, and shader consumption
 of managed host values remains rejected.
 
 The runtime draws on Sebastian Aaltonen's

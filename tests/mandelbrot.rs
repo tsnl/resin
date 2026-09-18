@@ -88,7 +88,7 @@ fn a_segment_writes_only_its_own_row_range() {
             let count = u64(plot.width) * u64(plot.height) * u64(4);
             let pixels = arc_span_alloc::<u8>(count + u64(1), u8(123))?;
             let view = pixels:get();
-            let root = Parameters<_> { plot = plot, solver = mandelbrot_new(32),
+            let root = Parameters { plot = plot, solver = mandelbrot_new(32),
                 start_segment = 0, segment_count = plot:segment_count(), pixels = view:slice(u64(0), count) };
             assert(plot:segment_count() == u64(4));
             evaluate_segment(u64(0), root);
@@ -155,13 +155,13 @@ fn compute_matches_cpu_for_partial_segments() {
                 sentinel:store(u8(123));
                 let commands = gpu:start_command_recording()?;
                 // Two explicit ranges exercise batch-local invocation indices.
-                let first = Parameters<_> {
+                let first = Parameters {
                     plot = plot, solver = solver,
-                    start_segment = 0, segment_count = 7, pixels = pixels,
+                    start_segment = 0, segment_count = 7, pixels = pixels:device(),
                 };
-                let second = Parameters<_> {
+                let second = Parameters {
                     plot = plot, solver = solver,
-                    start_segment = 7, segment_count = segments - 7, pixels = pixels,
+                    start_segment = 7, segment_count = segments - 7, pixels = pixels:device(),
                 };
                 commands:dispatch(pipeline, first, u32((u64(7) + group_size - u64(1)) / group_size), 1, 1)?;
                 commands:dispatch(pipeline, second, u32((segments - u64(7) + group_size - u64(1)) / group_size), 1, 1)?;

@@ -32,7 +32,7 @@ not equal physical lanes, but the program must assign those jobs explicitly.
 
 ## Host calls
 
-An ordinary host call borrows a caller-supplied initialized local, as in `main`
+An ordinary host call borrows a caller-supplied initialized local, as in `host_main`
 above. It runs with lane index zero and lane count one; `sync()` is a no-op.
 It neither resets the supplied state nor creates threads. The example explicitly
 assigns both producer jobs to the sole lane in that case.

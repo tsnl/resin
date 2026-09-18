@@ -178,7 +178,8 @@ implementation. `T | None` is available in shader-local values when `T` is compa
 Managed handles use an opaque 64-bit slot in shared layouts. Their pointee layouts
 need not be GPU-compatible. No pointer graph is translated or mirrored across the
 host/device boundary. Compiler projection translates owning GPU views in a host launch record into the
-shader's raw pointer/span representation, retaining all referenced allocations.
+shader's raw pointer/span representation, retaining those explicit owners. Roots already matching the shader type preserve
+their raw addresses and do not retain pointee allocations.
 
 ## Standard library
 
@@ -195,13 +196,15 @@ before releasing resources that may still be in use.
 
 `commands:dispatch(pipeline, arguments, x, y, z)` and
 `commands:draw(pipeline, arguments, count)` check host arguments against the typed
-pipeline, project them internally, and retain the root and its referenced
-allocations after successful recording. `commands:draw(pipeline, None, count)`
-supplies no root for a rootless graphics pipeline. Shader entry
-parameters remain raw `Ptr<T>` values. Host `GpuPtr` and `GpuSpan` values are owning
-GPU views. Indexing, slicing, and explicit cloning retain their owner. Host access
-uses checked `load`, `store`, and `replace` methods; it cannot obtain a raw host pointer. Allocation-wide recording state rejects CPU access until work completes or
-is canceled; per-view permissions additionally control host reads and writes.
+pipeline and retain a root snapshot after successful recording. Explicit root values
+preserve raw pointer bits; the caller retains their pointee allocations until work
+finishes. The convenience projection of owning GPU views retains those explicit
+owners. `commands:draw(pipeline, None, count)` supplies no root for a rootless
+pipeline. `device()` and `map()` return borrowed device and host pointers/spans;
+keep the GPU owner alive throughout access. These pointers have unchecked lifetimes,
+address spaces, and synchronization, just like other low-level borrowed pointers.
+Checked owner `load`, `store`, and `replace` operations remain available, but their
+recording checks cannot police escaped raw pointers.
 See [GPU buffers](gpu-buffers.md) for projection and layout requirements.
 
 The standard library and its examples no longer require `gpu_destroy`, `gpu_free`,
