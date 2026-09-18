@@ -395,6 +395,13 @@ Think CUDA, but lowering to Vulkan and exposing fixed-function rendering functio
   before storage lowering. Diagnostics render source type names instead of private type IDs.
   keep inference solvers and deferred emission callbacks out of the lowering pass.
 - Shader entries use `@compute_shader`, `@vertex_shader`, or `@fragment_shader` decorators.
+  The explicit-workgroup prototype additionally permits a third `RefMut<State>`
+  parameter, spelled `Workgroup<State>` through `$/workgroup.resin`. GPU wrappers
+  provide zero-initialized Workgroup storage; ordinary host calls borrow a local
+  and execute as one lane. Keep synchronization explicit and preserve per-thread
+  entry/index/dispatch semantics. Check shared-reference origins in SPIR-V and
+  reject checked-failure paths for these entries; uniform barrier participation
+  and race freedom remain the programmer's responsibility. See `doc/workgroups.md`.
   Compute entries take `(u64, Ptr<T>)` and return unit; their index is the global X invocation
   index. Their signatures are checked at declaration; helpers need no decoration and remain host-callable.
   Pipeline creation accepts decorated shader declarations directly and requests their compiled

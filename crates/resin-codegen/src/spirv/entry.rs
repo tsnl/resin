@@ -3,7 +3,11 @@ use crate::Error;
 use resin_types::{prelude::*, shader::Interface};
 use rspirv::{dr::Operand, spirv::*};
 
-use super::{Context, build_error};
+use super::{
+    Context, build_error,
+    symbols::{LocalAddress, Slot},
+    workgroup,
+};
 
 pub(super) fn lower(
     context: &mut Context<'_>,
@@ -29,12 +33,50 @@ pub(super) fn lower(
     context.builder.name(wrapper, "main");
     context.builder.begin_block(None).map_err(build_error)?;
     let inputs = variables.arguments(context, &interface)?;
-    let result_type = context.ty(result)?;
-    let output = context
-        .builder
-        .function_call(result_type, None, context.functions[entry.index()], inputs)
-        .map_err(build_error)?;
-    let may_fail = context.function_may_fail(context.functions[entry.index()]);
+    let (output, callee) = if let (
+        Interface::Compute {
+            workgroup: Some(state),
+            ..
+        },
+        Some(shared),
+    ) = (&interface, variables.shared)
+    {
+        let mut args = vec![Slot::value(
+            function.ty().unwrap(),
+            context.functions[entry.index()],
+        )];
+        args.extend(
+            inputs
+                .iter()
+                .zip(&params)
+                .map(|(&id, ty)| Slot::value(ty.clone(), id)),
+        );
+        workgroup::initialize(context, shared, state)?;
+        args.push(Slot {
+            ty: params[2].clone(),
+            id: shared,
+            local: Some(LocalAddress {
+                root: shared,
+                storage: StorageClass::Workgroup,
+                root_type: state.clone(),
+                indices: vec![],
+            }),
+        });
+        let (output, callee) = super::calls::local_call(context, &args, result)?;
+        (output.id, callee)
+    } else {
+        let result_type = context.ty(result)?;
+        let callee = context.functions[entry.index()];
+        let output = context
+            .builder
+            .function_call(result_type, None, callee, inputs)
+            .map_err(build_error)?;
+        (output, callee)
+    };
+    let may_fail = context.function_may_fail(callee);
+    if variables.shared.is_some() && may_fail {
+        return Err(Error::unsupported("explicit-workgroup shaders cannot use checked operations that may terminate a lane before a barrier; avoid assertions, trapping unwraps, checked casts, and checked division".into()));
+    }
     variables.finish(context, &interface, result, output, may_fail)?;
     context.builder.ret().map_err(build_error)?;
     context.builder.end_function().map_err(build_error)?;
@@ -49,6 +91,7 @@ struct Variables {
     outputs: Vec<Word>,
     vector: Word,
     workgroup_size: Option<Word>,
+    shared: Option<Word>,
 }
 
 impl Variables {
@@ -61,10 +104,13 @@ impl Variables {
             outputs: Vec::new(),
             vector: context.builder.type_vector(float, 4),
             workgroup_size: None,
+            shared: None,
         };
         match interface {
             Interface::RayGeneration { .. } | Interface::RayHit { .. } => unreachable!("ray entry"),
-            Interface::Compute { .. } => {
+            Interface::Compute {
+                workgroup: state, ..
+            } => {
                 let uint = context.ty(&Ty::UInt32)?;
                 // The runtime's compute ABI specializes ID 0 for the selected GPU.
                 // One invocation is a valid default for standalone SPIR-V tools.
@@ -82,6 +128,19 @@ impl Variables {
                     BuiltIn::LocalInvocationId,
                     "local_invocation_id",
                 );
+                if let Some(state) = state {
+                    let ty = context.ty(state)?;
+                    variables.shared = Some(variables.variable(
+                        context,
+                        ty,
+                        StorageClass::Workgroup,
+                        "workgroup_state",
+                    ));
+                    context.workgroup = Some(workgroup::Builtins {
+                        lane: variables.inputs[1],
+                        width,
+                    });
+                }
                 variables.push_constant(context)?;
             }
             Interface::Vertex { root, .. } => {

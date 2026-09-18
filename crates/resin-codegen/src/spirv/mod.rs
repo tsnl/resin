@@ -12,6 +12,7 @@ mod ops;
 mod ray;
 mod symbols;
 mod types;
+mod workgroup;
 
 pub(super) fn generate(
     checked: resin_lir::Verified<'_>,
@@ -25,6 +26,25 @@ pub(super) fn generate(
         .ok_or_else(|| Error::unsupported("shader entry was not requested".into()))?;
     let mut context = Context::new(module, &analysis.types, &analysis.functions);
     ray::declare(&mut context, entry, stage, reachable)?;
+    context.requires_workgroup =
+        workgroup::required_functions(module, reachable, &context.functions);
+    let explicit_group =
+        stage == Stage::Compute && module.functions[entry.index()].parameter_count == 3;
+    if !explicit_group
+        && context
+            .requires_workgroup
+            .contains(&context.functions[entry.index()])
+    {
+        return Err(Error::unsupported(
+            "workgroup operations require a compute entry with a third Workgroup<State> parameter"
+                .into(),
+        ));
+    }
+    if explicit_group {
+        context
+            .requires_workgroup
+            .insert(context.functions[entry.index()]);
+    }
     for &function in reachable {
         let index = function.index();
         register_function_types(&mut context, index, &analysis.functions[index])?;
@@ -37,6 +57,9 @@ pub(super) fn generate(
             matches!(&parameter.ty, Ty::Reference { referent, .. } if resin_types::layout::layout(&module.types, referent).is_err())
         }) { continue; }
         let id = context.functions[index];
+        if context.requires_workgroup.contains(&id) {
+            continue;
+        }
         let may_fail = function::lower(
             &mut context,
             &module.functions[index],
@@ -77,6 +100,8 @@ struct Context<'a> {
     // Emission completes each callee before its callers. Absence is not infallibility.
     fallibility: HashMap<Word, bool>,
     failed: Word,
+    requires_workgroup: HashSet<Word>,
+    workgroup: Option<workgroup::Builtins>,
     glsl: Word,
     types: HashMap<(Ty, types::Representation), Word>,
     u32_constants: HashMap<u32, Word>,
@@ -118,6 +143,8 @@ impl<'a> Context<'a> {
             local_call_depth: 0,
             fallibility: HashMap::new(),
             failed,
+            requires_workgroup: HashSet::new(),
+            workgroup: None,
             glsl,
             types: HashMap::new(),
             u32_constants: HashMap::new(),

@@ -1,0 +1,45 @@
+// ANCHOR: workgroup
+export { main, kernel };
+import { "$/workgroup.resin", "$/span.resin", "$/shared.resin" };
+
+struct State { left: f32, right: f32 }
+struct Root { output: Span<f32> }
+
+// Helpers receive the same ordinary mutable reference as the entry.
+fn publish(group: Workgroup<State>) {
+	group:sync();
+}
+fn sum(left: Ref<f32>, right: Ref<f32>) -> f32 {
+	left + right
+}
+
+@compute_shader
+fn kernel(index: u64, root: Ptr<Root>, group: Workgroup<State>) {
+	let lane = group:lane_index();
+	let width = group:lane_count();
+	let base = index - lane;
+	if (lane == 0) {
+		group.left = f32(base + 1);
+	};
+	// A one-lane host run performs both producer jobs.
+	if (lane == 1 || width == 1) {
+		group.right = f32(base + 2);
+	};
+	// Every lane participates, including lanes with no producer job.
+	publish(group);
+	if (lane == 0) {
+		root.output:at_mut(base) = sum(group.left, group.right);
+	};
+}
+
+fn main() -> i32 | Err<_> {
+	let output = arc_span_alloc::<f32>(1, 0)?;
+	let root = arc_ptr_alloc(Root { output = output:get() })?;
+	let mut state = State { left = 0, right = 0 };
+	// A host call is one lane. It borrows the caller's explicitly initialized state.
+	kernel(0, root:get(), state);
+	let view = output:get();
+	assert(view:at(0) == f32(3));
+	0
+}
+// ANCHOR_END: workgroup

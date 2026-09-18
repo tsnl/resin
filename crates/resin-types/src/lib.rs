@@ -27,7 +27,7 @@ pub mod prelude {
         ArrayValue, BuiltinCall, BuiltinRule, Case, Conv, Converted, ExplicitConversion,
         FieldAccess, Foreign, FunctionId, Intrinsic, LocalId, RecordField, RecordFieldValue,
         RecordValue, StaticAddressValue, Ty, TypeDef, TypeError, TypeErrorKind, TypeId, TypeTable,
-        TyperContext, Value,
+        TyperContext, Value, WorkgroupOperation,
     };
 }
 
@@ -469,6 +469,7 @@ impl Ty {
 pub enum Intrinsic {
     TraceRay,
     RayHitInfo,
+    Workgroup { operation: WorkgroupOperation },
     GpuPointerProjection,
     GpuSequenceProjection,
     GpuPipelineType,
@@ -504,6 +505,24 @@ pub enum Intrinsic {
     GpuArgumentsTraceRays,
     GpuArgumentsDispatch,
     GpuArgumentsDraw,
+}
+
+/// Explicit collective operations on a borrowed compute workgroup state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkgroupOperation {
+    Sync,
+    LaneIndex,
+    LaneCount,
+}
+
+impl WorkgroupOperation {
+    pub fn result(self) -> Ty {
+        if self == Self::Sync {
+            Ty::Unit
+        } else {
+            Ty::UInt64
+        }
+    }
 }
 
 /// Validate references in a concrete type against a program's canonical table.
@@ -1021,6 +1040,8 @@ pub mod shader {
         },
         Compute {
             index: Ty,
+            /// Mutable state supplied by the GPU entry wrapper, when requested.
+            workgroup: Option<Ty>,
         },
         Vertex {
             index: Ty,

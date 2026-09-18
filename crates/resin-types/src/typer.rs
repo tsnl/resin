@@ -346,13 +346,31 @@ pub(super) fn validate_shader(
     if foreign {
         return Err("foreign functions cannot be shader entries".into());
     }
+    let (parameters, workgroup) = match parameters {
+        [
+            _,
+            _,
+            Ty::Reference {
+                mutable: true,
+                referent,
+            },
+        ] if stage == "compute" => {
+            workgroup_storage_size(typer.definitions(), referent)?;
+            (&parameters[..2], Some(*referent.clone()))
+        }
+        _ => (parameters, None),
+    };
     let (input, root) = match parameters {
         [input] => (input, false),
         [input, Ty::Pointer { .. }] => (input, true),
         _ => {
-            return Err(format!(
-                "invalid @{stage}_shader signature: expected one input and an optional Ptr<T> root"
-            ));
+            return Err(if stage == "compute" {
+                "invalid @compute_shader signature: expected (u64, Ptr<T>) -> () with an optional third Workgroup<State> / RefMut<State> parameter".into()
+            } else {
+                format!(
+                    "invalid @{stage}_shader signature: expected one input and an optional Ptr<T> root"
+                )
+            });
         }
     };
     let input_shape = shader_shape(typer, input)?;
@@ -372,6 +390,7 @@ pub(super) fn validate_shader(
         "compute" if root && input_shape == Ty::UInt64 && result == Ty::Unit => {
             Some(shader::Interface::Compute {
                 index: input.clone(),
+                workgroup,
             })
         }
         "vertex" if input_shape == Ty::Int32 => match &result {
@@ -409,7 +428,8 @@ pub(super) fn validate_shader(
         Err(format!(
             "invalid @{stage}_shader signature: {}",
             match stage {
-                "compute" => "expected (u64, Ptr<T>) -> ()",
+                "compute" =>
+                    "expected (u64, Ptr<T>) -> () with an optional third Workgroup<State> / RefMut<State> parameter",
                 "vertex" => "expected i32 or (i32, Ptr<T>) returning a position/color record",
                 "fragment" =>
                     "expected Color or (Color, Ptr<T>) returning Color or Color | None with f32 r/g/b/a fields",
@@ -636,4 +656,48 @@ pub(super) fn ray_payload(definitions: &[TypeDef], ty: &Ty) -> Result<(), String
             "ray payloads require f32/i32/u32 values, arrays, or records of those values".into(),
         ),
     }
+}
+
+fn workgroup_storage_size(definitions: &[TypeDef], ty: &Ty) -> Result<usize, String> {
+    if ty.needs_drop(definitions) {
+        return Err("workgroup state cannot own host-managed resources".into());
+    }
+    let size = match ty {
+        Ty::Defined { definition } => {
+            return workgroup_storage_size(
+                definitions,
+                crate::definition_body(definitions, *definition)
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        Ty::Array { element, length } if *length > 0 => {
+            workgroup_storage_size(definitions, element)?.checked_mul(*length)
+        }
+        Ty::Record { fields } => {
+            let mut total = Some(0usize);
+            for field in fields {
+                let size = workgroup_storage_size(definitions, &field.ty)?;
+                total = total.and_then(|total| total.checked_add(size));
+            }
+            total.map(|size| size.max(8))
+        }
+        Ty::Bool
+        | Ty::Unit
+        | Ty::UInt8
+        | Ty::Int32
+        | Ty::UInt32
+        | Ty::Int64
+        | Ty::UInt64
+        | Ty::Float32
+        | Ty::Pointer { .. } => Some(8),
+        _ => {
+            return Err(
+                "workgroup state requires plain scalars, pointers, records, or nonempty arrays"
+                    .into(),
+            );
+        }
+    };
+    size.filter(|size| *size <= 16384).ok_or_else(|| {
+        "workgroup state exceeds the conservative 16 KiB shared-storage budget".into()
+    })
 }

@@ -579,6 +579,21 @@ pub(super) fn primitive_signature(
                 ("_4", Type::Float32),
             ]),
         ),
+        ("workgroup_sync" | "workgroup_lane_index" | "workgroup_lane_count", [state]) => {
+            let operation = match operation {
+                "workgroup_sync" => WorkgroupOperation::Sync,
+                "workgroup_lane_index" => WorkgroupOperation::LaneIndex,
+                _ => WorkgroupOperation::LaneCount,
+            };
+            (
+                Intrinsic::Workgroup { operation },
+                vec![Type::Reference {
+                    mutable: true,
+                    referent: Box::new(state.clone()),
+                }],
+                super::types::ty(&operation.result()),
+            )
+        }
         ("pointer_index", [element]) => (
             Intrinsic::PointerIndex,
             vec![pointer(element.clone()), Type::UInt64, Type::UInt64],
