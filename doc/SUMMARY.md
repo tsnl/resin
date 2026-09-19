@@ -40,6 +40,7 @@
   - [Compiler architecture](architecture.md)
   - [Maintaining the parser](parser.md)
   - [Design rationale](design.md)
+  - [Python and C bindings proposal](python-c-bindings.md)
   - [Compiler-service validation](compiler-service-validation.md)
   - [CPU and GPU benchmarks](benchmarks.md)
   - [Compiler-service benchmarks](service-benchmarks.md)
